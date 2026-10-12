@@ -1856,31 +1856,22 @@ func (m *Model) renderFilters() string {
 }
 
 func (m *Model) renderHelp() string {
+	// Only the main key for each action: the other ways that exist (w/b,
+	// Tab, PageUp and so on) are left out on purpose.
 	rows := [][2]string{
-		{"j / k, ^ / v", "Move selection (or scroll preview)"},
-		{"w / b, n / N", "Next / previous result"},
-		{"5j / 3k", "Move several results"},
-		{"gg / G, 0 / $", "First / last result"},
-		{"H / M / L", "Top / middle / bottom of visible list"},
-		{"Ctrl+d/u, Ctrl+f/b", "Half-page / full-page down / up"},
-		{"h / l, Tab", "Focus results / preview (Tab toggles)"},
-		{"/ , r", "Edit search (Up/Down: past ones) / repeat it"},
+		{"j k", "Move through the results"},
+		{"h l", "Switch between the results and the preview"},
+		{"Enter", "Play in mpv, or open a playlist"},
+		{"Esc", "Go back from a playlist or a selection"},
+		{"/  r", "Edit the search (Up/Down: past ones) / repeat it"},
 		{"f", "Filters: type, duration, upload date"},
-		{"t", "Cycle the color theme"},
-		{"V, Enter", "Select lines (j/k) / play in mpv, as a queue"},
-		{"d / a / Q", "Download / audio-only / video quality"},
-		{"o / y", "Open / copy URL (3o, 3y: description link 3)"},
-		{"? / Esc", "Close this help"},
-		{"q", "Quit"},
+		{"V", "Select lines: Enter plays them, d downloads them"},
+		{"d  a  Q", "Download / audio only / video quality"},
+		{"o  y", "Open / copy a link (3o: description link 3)"},
+		{"t", "Next color theme"},
+		{"?  q", "Close this help / quit"},
 	}
-	notes := []string{
-		"Search includes regular videos and a live-oriented query.",
-		"Current livestreams open YouTube chat in your browser.",
-		"Shorts are marked [SHORT]; ordinary videos have no type label.",
-		"Playlists are marked PLAYLIST; Enter plays all their videos.",
-		"Filters stay on for every search until you reset them (x in the menu).",
-		"Description links are numbered [1], [2]...; a handler per kind: see config.",
-	}
+	notes := []string{"Vim motions work too: gg, G, 5j, Ctrl+d and so on."}
 	// Try the roomiest layout first and drop notes, padding and the blank
 	// line under the title until the box fits the terminal height.
 	layouts := []struct {
@@ -1890,12 +1881,12 @@ func (m *Model) renderHelp() string {
 	var box string
 	for _, layout := range layouts {
 		var b strings.Builder
-		b.WriteString(panelTitleStyle.Render("KEYBOARD") + "\n")
+		b.WriteString(panelTitleStyle.Render("KEYS") + "\n")
 		if layout.titleGap {
 			b.WriteString("\n")
 		}
 		for i, row := range rows {
-			b.WriteString("  " + searchStyle.Render(padToWidth(row[0], 20)) + helpStyle.Render(row[1]))
+			b.WriteString("  " + searchStyle.Render(padToWidth(row[0], 10)) + helpStyle.Render(row[1]))
 			if i < len(rows)-1 {
 				b.WriteString("\n")
 			}

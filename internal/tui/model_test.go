@@ -180,7 +180,10 @@ func TestHelpFitsTheTerminal(t *testing.T) {
 				t.Errorf("%v: help line %d is %d wide", size, i, w)
 			}
 		}
-		for _, want := range []string{"KEYBOARD", "Quit"} {
+		for _, want := range []string{"KEYS", "quit", "Vim motions"} {
+			if want == "Vim motions" && size[1] < 20 {
+				continue // the note is the first thing to go in a short terminal
+			}
 			if !strings.Contains(out, want) {
 				t.Errorf("%v: help is missing %q (cut off)", size, want)
 			}
@@ -799,5 +802,28 @@ func TestANewSearchLeavesTheOpenPlaylist(t *testing.T) {
 	m.cancel()
 	if len(m.parents) != 0 || m.listTitle != "" {
 		t.Fatal("a new search should leave the playlist")
+	}
+}
+
+// The help lists one key for each action. The extra ways that exist are not
+// documented, so the screen stays short.
+func TestHelpIsShortAndHasNoDuplicateKeys(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 100, 30
+	m.showHelp = true
+	out := m.View()
+	rows := 0
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(strings.Trim(line, "│┌┐└┘─ ")) != "" {
+			rows++
+		}
+	}
+	if rows > 15 {
+		t.Errorf("the help has %d lines of text, keep it short", rows)
+	}
+	for _, duplicate := range []string{"w / b", "n / N", "Tab", "PageUp", "Ctrl+f", "0 / $", "H / M / L"} {
+		if strings.Contains(out, duplicate) {
+			t.Errorf("the help should not document %q", duplicate)
+		}
 	}
 }
