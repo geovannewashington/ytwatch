@@ -102,3 +102,61 @@ func TestParseThemeErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestParseLinkHandlersKeepFileOrderAndLiteralStrings(t *testing.T) {
+	cfg, err := Parse(`
+[general]
+browser = "firefox --private-window"
+
+[link.images]
+match = '\.(png|jpe?g)(\?.*)?$'   # literal string: no escapes needed
+command = ["nsxiv", "%l"]
+
+[link.music]
+match = "spotify\\.com"
+command = ["mpv", "--no-video", "%l"]
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.General.Browser != "firefox --private-window" {
+		t.Fatalf("browser = %q", cfg.General.Browser)
+	}
+	if len(cfg.Links) != 2 || cfg.Links[0].Name != "images" || cfg.Links[1].Name != "music" {
+		t.Fatalf("links = %+v", cfg.Links)
+	}
+	if !cfg.Links[0].Match.MatchString("https://x.com/a.jpg?w=1") || cfg.Links[0].Match.MatchString("https://x.com/a.html") {
+		t.Fatal("images pattern does not match as expected")
+	}
+	if !cfg.Links[1].Match.MatchString("https://open.spotify.com/track/1") {
+		t.Fatal("music pattern should match spotify links")
+	}
+	if want := []string{"mpv", "--no-video", "%l"}; !reflect.DeepEqual(cfg.Links[1].Command, want) {
+		t.Fatalf("command = %v", cfg.Links[1].Command)
+	}
+}
+
+func TestParseLinkHandlerErrors(t *testing.T) {
+	for _, text := range []string{
+		"[link.a]\nmatch = \"(\"\ncommand = [\"x\"]",   // bad regexp
+		"[link.a]\nmatch = \"x\"",                      // no command
+		"[link.a]\ncommand = [\"x\"]",                  // no pattern
+		"[link.a]\nmatch = \"x\"\ncommand = []",        // empty command
+		"[link.a]\nmatch = \"x\"\ncommand = \"nsxiv\"", // not an array
+		"[link.a]\nbogus = 1",                          // unknown key
+		"[link.]\nmatch = \"x\"\ncommand = [\"x\"]",    // no name
+	} {
+		if _, err := Parse(text); err == nil {
+			t.Errorf("expected error for %q", text)
+		}
+	}
+}
+
+func TestCommentsInsideSingleQuotesAreKept(t *testing.T) {
+	if got := stripComment(`match = 'a#b' # note`); got != `match = 'a#b' ` {
+		t.Fatalf("got %q", got)
+	}
+	if got := stripComment(`x = "it's" # note`); got != `x = "it's" ` {
+		t.Fatalf("got %q", got)
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -23,6 +24,25 @@ type Config struct {
 	Chat     Chat
 	Download Download
 	Theme    Theme
+	// Links are the programs that open description links, tried in the order
+	// they appear in the file. See LinkHandler.
+	Links []LinkHandler
+}
+
+// LinkHandler opens the description links that match a pattern, for example
+// images in nsxiv:
+//
+//	[link.images]
+//	match = '\.(png|jpe?g|gif|webp)(\?.*)?$'
+//	command = ["nsxiv", "%l"]
+//
+// match is a Go regular expression and %l in command is the link. The command
+// is run directly, never through a shell. Links without a handler open in the
+// browser.
+type LinkHandler struct {
+	Name    string
+	Match   *regexp.Regexp
+	Command []string
 }
 
 // Theme selects the colours. Name is a preset (see package theme) and Colors
@@ -33,6 +53,10 @@ type Theme struct {
 }
 
 type General struct {
+	// Browser is the command that opens links ("o"), with optional arguments.
+	// Empty uses $BROWSER, then the desktop's default browser. The chat window
+	// uses it too unless chat.browser is set.
+	Browser string
 	// AudioOnly starts ytwatch in audio-only mode. It applies to playback and
 	// downloads, and can be toggled with "a".
 	AudioOnly bool
@@ -135,15 +159,23 @@ func Parse(text string) (Config, error) {
 			return cfg, fmt.Errorf("line %d: %w", lineNo, err)
 		}
 	}
-	return cfg, scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return cfg, err
+	}
+	return cfg, cfg.checkLinks()
 }
 
 func (c *Config) set(section, key, raw string) error {
 	if section == "theme" {
 		return c.setTheme(key, raw)
 	}
+	if name, ok := strings.CutPrefix(section, "link."); ok {
+		return c.setLink(name, key, raw)
+	}
 	var err error
 	switch section + "." + key {
+	case "general.browser":
+		c.General.Browser, err = parseString(raw)
 	case "general.audio_only":
 		c.General.AudioOnly, err = strconv.ParseBool(raw)
 	case "download.dir":
@@ -196,10 +228,59 @@ func (c *Config) setTheme(key, raw string) error {
 	return nil
 }
 
+func (c *Config) setLink(name, key, raw string) error {
+	if name == "" {
+		return fmt.Errorf("a link section needs a name, like [link.images]")
+	}
+	i := slices.IndexFunc(c.Links, func(h LinkHandler) bool { return h.Name == name })
+	if i < 0 {
+		c.Links = append(c.Links, LinkHandler{Name: name})
+		i = len(c.Links) - 1
+	}
+	switch key {
+	case "match":
+		value, err := parseString(raw)
+		if err != nil {
+			return fmt.Errorf("invalid value for %s: %w", key, err)
+		}
+		re, err := regexp.Compile(value)
+		if err != nil {
+			return fmt.Errorf("invalid pattern for [link.%s]: %w", name, err)
+		}
+		c.Links[i].Match = re
+	case "command":
+		value, err := parseStringArray(raw)
+		if err != nil {
+			return fmt.Errorf("invalid value for %s: %w", key, err)
+		}
+		if len(value) == 0 || value[0] == "" {
+			return fmt.Errorf("command of [link.%s] is empty", name)
+		}
+		c.Links[i].Command = value
+	default:
+		return fmt.Errorf("unknown setting %q in section [link.%s] (match, command)", key, name)
+	}
+	return nil
+}
+
+// checkLinks reports a link handler that lacks its pattern or command.
+func (c *Config) checkLinks() error {
+	for _, h := range c.Links {
+		if h.Match == nil || len(h.Command) == 0 {
+			return fmt.Errorf("[link.%s] needs both match and command", h.Name)
+		}
+	}
+	return nil
+}
+
 // parseString accepts "quoted" strings and bare integers (for workspace = 3).
 func parseString(raw string) (string, error) {
 	if strings.HasPrefix(raw, `"`) {
 		return strconv.Unquote(raw)
+	}
+	// 'literal strings' have no escapes, which suits regular expressions.
+	if len(raw) >= 2 && raw[0] == '\'' && raw[len(raw)-1] == '\'' {
+		return raw[1 : len(raw)-1], nil
 	}
 	if _, err := strconv.Atoi(raw); err == nil {
 		return raw, nil
@@ -237,19 +318,21 @@ func parseStringArray(raw string) ([]string, error) {
 
 // stripComment removes a trailing # comment that is not inside a string.
 func stripComment(line string) string {
-	inString := false
+	var quote byte // the quote that opened the current string, or 0
 	for i := 0; i < len(line); i++ {
-		switch line[i] {
-		case '\\':
-			if inString {
-				i++
+		c := line[i]
+		switch {
+		case c == '\\' && quote == '"':
+			i++
+		case c == '"' || c == '\'':
+			switch quote {
+			case 0:
+				quote = c
+			case c:
+				quote = 0
 			}
-		case '"':
-			inString = !inString
-		case '#':
-			if !inString {
-				return line[:i]
-			}
+		case c == '#' && quote == 0:
+			return line[:i]
 		}
 	}
 	return line

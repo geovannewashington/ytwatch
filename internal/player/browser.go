@@ -11,6 +11,9 @@ import (
 type chatBrowser struct {
 	path string
 	args []string // placed before the URL
+	// newWindow is set for browsers that accept --new-window. The chat window
+	// adds it; opening a plain link does not, so the link opens in a tab.
+	newWindow bool
 	// name identifies the browser's windows so they can be moved to a
 	// workspace. It is empty for xdg-open, whose browser is unknown.
 	name string
@@ -84,15 +87,15 @@ func withoutPlaceholder(fields []string) []string {
 
 func newChatBrowser(path, command string, extra []string) chatBrowser {
 	name := strings.ToLower(filepath.Base(command))
-	args := append([]string(nil), extra...)
+	b := chatBrowser{path: path, args: append([]string(nil), extra...)}
 	for _, known := range newWindowBrowsers {
 		if strings.Contains(name, known) {
-			args = append(args, "--new-window")
+			b.newWindow = true
 			break
 		}
 	}
-	name = strings.TrimSuffix(strings.TrimSuffix(name, "-stable"), "-bin")
-	return chatBrowser{path: path, args: args, name: name}
+	b.name = strings.TrimSuffix(strings.TrimSuffix(name, "-stable"), "-bin")
+	return b
 }
 
 // defaultBrowserDesktop returns the desktop file name of the default browser,

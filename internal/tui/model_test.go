@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -326,5 +328,74 @@ func TestThemeConfigAndCycling(t *testing.T) {
 	want := names[(slices.Index(names, "nord")+1)%len(names)]
 	if m.themeName != want || !strings.Contains(m.status, want) {
 		t.Fatalf("after t: theme %q status %q, want %q", m.themeName, m.status, want)
+	}
+}
+
+func linkTestModel(t *testing.T) (*Model, *[]string) {
+	t.Helper()
+	m := New("test")
+	m.width, m.height = 140, 40
+	m.items = []media.Video{{
+		ID: "video0001", Title: "Song", Channel: "Chan", Duration: 60,
+		Description: "Site: http://www.band.com. Cover https://img.example.com/cover.jpg?w=1 and http://www.band.com again",
+	}, {ID: "video0002", Title: "No links", Duration: 60, Description: "plain text"}}
+	m.metadataDone = true
+	var calls []string
+	m.openURL = func(url string, _ config.Config) error { calls = append(calls, "browser "+url); return nil }
+	m.runCommand = func(argv []string) error { calls = append(calls, strings.Join(argv, " ")); return nil }
+	cfg := config.Default()
+	cfg.Links = []config.LinkHandler{{
+		Name: "images", Match: regexp.MustCompile(`\.(png|jpe?g)(\?.*)?$`), Command: []string{"nsxiv", "%l"},
+	}}
+	m.SetConfig(cfg)
+	return m, &calls
+}
+
+func TestPreviewNumbersDescriptionLinks(t *testing.T) {
+	m, _ := linkTestModel(t)
+	preview := m.renderPreview(100, 30)
+	for _, want := range []string{"[1] http://www.band.com.", "[2] https://img.example.com/cover.jpg?w=1", "[1] http://www.band.com again"} {
+		if !strings.Contains(preview, want) {
+			t.Errorf("preview is missing %q:\n%s", want, preview)
+		}
+	}
+}
+
+func TestOpenKeyOpensTheVideoOrANumberedLink(t *testing.T) {
+	m, calls := linkTestModel(t)
+
+	m.handleKey(runeKey('o')) // no count: the video, in the browser
+	m.handleKey(runeKey('1'))
+	m.handleKey(runeKey('o')) // link 1 has no handler: browser
+	m.handleKey(runeKey('2'))
+	m.handleKey(runeKey('o')) // link 2 is an image: the handler
+	want := []string{
+		"browser https://www.youtube.com/watch?v=video0001",
+		"browser http://www.band.com",
+		"nsxiv https://img.example.com/cover.jpg?w=1",
+	}
+	if !reflect.DeepEqual(*calls, want) {
+		t.Fatalf("calls = %q\nwant   %q", *calls, want)
+	}
+	if !strings.Contains(m.status, "Opened link 2") || !strings.Contains(m.status, "images") {
+		t.Fatalf("status = %q", m.status)
+	}
+}
+
+func TestLinkNumberOutOfRangeAndNoLinks(t *testing.T) {
+	m, calls := linkTestModel(t)
+	m.handleKey(runeKey('5'))
+	m.handleKey(runeKey('o'))
+	if !strings.Contains(m.status, "No link 5") || !strings.Contains(m.status, "2 links") {
+		t.Fatalf("status = %q", m.status)
+	}
+	m.handleKey(runeKey('j')) // the video without links
+	m.handleKey(runeKey('1'))
+	m.handleKey(runeKey('y'))
+	if !strings.Contains(m.status, "no links") {
+		t.Fatalf("status = %q", m.status)
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("nothing should have been opened: %q", *calls)
 	}
 }

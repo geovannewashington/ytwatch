@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/geovannewashington/ytwatch/internal/config"
 	"github.com/geovannewashington/ytwatch/internal/download"
+	"github.com/geovannewashington/ytwatch/internal/links"
 	"github.com/geovannewashington/ytwatch/internal/media"
 	"github.com/geovannewashington/ytwatch/internal/player"
 	"github.com/geovannewashington/ytwatch/internal/preview"
@@ -126,6 +128,10 @@ type Model struct {
 	marqueeStep int
 
 	themeName string
+
+	// openURL and runCommand open links; tests replace them.
+	openURL    func(string, config.Config) error
+	runCommand func([]string) error
 }
 
 func New(initialQuery string) *Model {
@@ -133,6 +139,8 @@ func New(initialQuery string) *Model {
 	m := &Model{
 		ctx: ctx, cancel: cancel,
 		themeName:      theme.Default,
+		openURL:        player.OpenURL,
+		runCommand:     links.Run,
 		query:          strings.TrimSpace(initialQuery),
 		status:         "Ready",
 		thumbnailPaths: make(map[string]string),
@@ -522,7 +530,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 	count := 1
-	if m.countPrefix != "" {
+	hasCount := m.countPrefix != ""
+	if hasCount {
 		if parsed, err := strconv.Atoi(m.countPrefix); err == nil && parsed > 0 {
 			count = parsed
 		}
@@ -672,24 +681,91 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	case "d":
 		return m.downloadSelected()
+	case "o":
+		return m.openLink(hasCount, count)
 	case "y":
-		v, ok := m.selectedVideo()
-		if !ok {
-			return nil
+		return m.copyLink(hasCount, count)
+	}
+	return nil
+}
+
+// linkTarget is what o and y act on: the selected video's URL, or link n of
+// its description when a count was typed (3o). ok is false when there is
+// nothing to act on, with the reason in the status line.
+func (m *Model) linkTarget(hasCount bool, n int) (url string, ok bool) {
+	v, found := m.selectedVideo()
+	if !found {
+		return "", false
+	}
+	if !hasCount {
+		if url = v.CanonicalURL(); url == "" {
+			m.status = "This result has no URL"
+			return "", false
 		}
-		if _, err := exec.LookPath("wl-copy"); err != nil {
-			m.status = "wl-copy not found | install wl-clipboard"
-			return nil
-		}
-		cmd := exec.Command("wl-copy")
-		cmd.Stdin = strings.NewReader(v.CanonicalURL())
-		if err := cmd.Start(); err != nil {
-			m.status = "Could not copy URL: " + err.Error()
-			return nil
-		}
-		go func() { _ = cmd.Wait() }()
-		m.status = "Copied video URL"
+		return url, true
+	}
+	_, urls := links.Annotate(strings.TrimSpace(v.Description))
+	switch {
+	case n <= len(urls):
+		return urls[n-1], true
+	case len(urls) == 0:
+		m.status = fmt.Sprintf("No link %d | this description has no links", n)
+	default:
+		m.status = fmt.Sprintf("No link %d | this description has %d links", n, len(urls))
+	}
+	return "", false
+}
+
+// openLink opens the video in the browser, or description link n with the
+// program configured for its kind (3o), falling back to the browser.
+func (m *Model) openLink(hasCount bool, n int) tea.Cmd {
+	url, ok := m.linkTarget(hasCount, n)
+	if !ok {
 		return nil
+	}
+	if hasCount {
+		if argv, name, matched := links.Command(url, m.cfg.Links); matched {
+			if err := m.runCommand(argv); err != nil {
+				m.status = fmt.Sprintf("Link %d | %v", n, err)
+				return nil
+			}
+			m.status = fmt.Sprintf("Opened link %d | %s", n, name)
+			return nil
+		}
+	}
+	if err := m.openURL(url, m.cfg); err != nil {
+		m.status = err.Error()
+		return nil
+	}
+	if hasCount {
+		m.status = fmt.Sprintf("Opened link %d in the browser", n)
+	} else {
+		m.status = "Opened the video in the browser"
+	}
+	return nil
+}
+
+// copyLink copies the video URL, or description link n (3y).
+func (m *Model) copyLink(hasCount bool, n int) tea.Cmd {
+	url, ok := m.linkTarget(hasCount, n)
+	if !ok {
+		return nil
+	}
+	if _, err := exec.LookPath("wl-copy"); err != nil {
+		m.status = "wl-copy not found | install wl-clipboard"
+		return nil
+	}
+	cmd := exec.Command("wl-copy")
+	cmd.Stdin = strings.NewReader(url)
+	if err := cmd.Start(); err != nil {
+		m.status = "Could not copy URL: " + err.Error()
+		return nil
+	}
+	go func() { _ = cmd.Wait() }()
+	if hasCount {
+		m.status = fmt.Sprintf("Copied link %d", n)
+	} else {
+		m.status = "Copied video URL"
 	}
 	return nil
 }
@@ -820,6 +896,7 @@ func (m *Model) previewMaxScroll() int {
 	if description == "" {
 		return 0
 	}
+	description, _ = links.Annotate(description)
 	_, width := m.paneWidths()
 	// PREVIEW, thumbnail rows, blank, title, channel, stats, blank, DESCRIPTION.
 	baseLines := m.thumbRows() + 7
@@ -1241,6 +1318,8 @@ func (m *Model) renderPreview(width, height int) string {
 			} else {
 				description = "No description available."
 			}
+		} else {
+			description, _ = links.Annotate(description)
 		}
 		lines = append(lines, "", panelTitleStyle.Render("DESCRIPTION"))
 		descLines := wrapLines(description, width, 1000)
@@ -1248,7 +1327,7 @@ func (m *Model) renderPreview(width, height int) string {
 		maxScroll := max(0, len(descLines)-available)
 		scroll := min(max(0, m.previewScroll), maxScroll)
 		for _, line := range descLines[scroll:min(len(descLines), scroll+available)] {
-			lines = append(lines, descriptionStyle.Render(truncate(line, width)))
+			lines = append(lines, descriptionStyle.Render(highlightLinkMarkers(truncate(line, width))))
 		}
 	}
 	if len(lines) > height {
@@ -1299,7 +1378,7 @@ func (m *Model) renderHelp() string {
 		{"Enter", "Play selected result in mpv"},
 		{"d / a", "Download selected / toggle audio-only"},
 		{"t", "Cycle the color theme"},
-		{"y", "Copy URL with wl-copy"},
+		{"o / y", "Open / copy URL (3o, 3y: description link 3)"},
 		{"? / Esc", "Close this help"},
 		{"q", "Quit"},
 	}
@@ -1308,6 +1387,7 @@ func (m *Model) renderHelp() string {
 		"Current livestreams open YouTube chat in your browser.",
 		"Shorts are marked [SHORT]; ordinary videos have no type label.",
 		"Playlists are marked PLAYLIST; Enter plays all their videos.",
+		"Description links are numbered [1], [2]...; a handler per kind: see config.",
 	}
 	// Try the roomiest layout first and drop notes, padding and the blank
 	// line under the title until the box fits the terminal height.
@@ -1362,11 +1442,38 @@ func badgeInfo(v media.Video) (string, lipgloss.Style) {
 	}
 }
 
+var linkMarker = regexp.MustCompile(`\[\d+\] https?://`)
+
+// highlightLinkMarkers colours the "[n]" in front of each numbered link.
+func highlightLinkMarkers(line string) string {
+	return linkMarker.ReplaceAllStringFunc(line, func(found string) string {
+		end := strings.IndexByte(found, ']') + 1
+		return keyStyle.Render(found[:end]) + found[end:]
+	})
+}
+
+var bareMarker = regexp.MustCompile(`^\[\d+\]$`)
+
+// joinLinkMarkers keeps a "[n]" marker and the link after it as one word, so
+// a line never breaks between them.
+func joinLinkMarkers(words []string) []string {
+	out := make([]string, 0, len(words))
+	for i := 0; i < len(words); i++ {
+		if bareMarker.MatchString(words[i]) && i+1 < len(words) && strings.HasPrefix(words[i+1], "http") {
+			out = append(out, words[i]+" "+words[i+1])
+			i++
+			continue
+		}
+		out = append(out, words[i])
+	}
+	return out
+}
+
 func wrapLines(s string, width, maxLines int) []string {
 	if width < 1 || maxLines < 1 {
 		return nil
 	}
-	words := strings.Fields(sanitize(strings.NewReplacer("\r", " ", "\n", " ").Replace(s)))
+	words := joinLinkMarkers(strings.Fields(sanitize(strings.NewReplacer("\r", " ", "\n", " ").Replace(s))))
 	if len(words) == 0 {
 		return nil
 	}

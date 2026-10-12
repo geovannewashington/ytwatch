@@ -22,8 +22,8 @@ func TestResolveBrowserConfiguredWins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b.path != "/usr/bin/chromium" || b.name != "chromium" ||
-		!reflect.DeepEqual(b.args, []string{"--incognito", "--new-window"}) {
+	if b.path != "/usr/bin/chromium" || b.name != "chromium" || !b.newWindow ||
+		!reflect.DeepEqual(b.args, []string{"--incognito"}) {
 		t.Fatalf("got %+v", b)
 	}
 }
@@ -40,7 +40,7 @@ func TestResolveBrowserEnvList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b.name != "firefox" || !reflect.DeepEqual(b.args, []string{"--new-window"}) {
+	if b.name != "firefox" || !b.newWindow || len(b.args) != 0 {
 		t.Fatalf("got %+v", b)
 	}
 }
@@ -50,7 +50,7 @@ func TestResolveBrowserDesktopAlias(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b.name != "google-chrome" || !reflect.DeepEqual(b.args, []string{"--new-window"}) {
+	if b.name != "google-chrome" || !b.newWindow || len(b.args) != 0 {
 		t.Fatalf("got %+v", b)
 	}
 }
@@ -60,7 +60,7 @@ func TestResolveBrowserUnknownBrowserGetsNoFlag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b.name != "qutebrowser" || len(b.args) != 0 {
+	if b.name != "qutebrowser" || b.newWindow || len(b.args) != 0 {
 		t.Fatalf("got %+v", b)
 	}
 }

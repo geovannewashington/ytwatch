@@ -1,11 +1,13 @@
 package player
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -161,12 +163,16 @@ func OpenYouTubeChat(v media.Video, cfg config.Config) error {
 	if !validID(v.ID) {
 		return fmt.Errorf("could not identify the live video for chat")
 	}
-	browser, err := resolveBrowser(cfg.Chat.Browser, os.Getenv("BROWSER"), defaultBrowserDesktop(), exec.LookPath)
+	browser, err := resolveBrowser(cmp.Or(cfg.Chat.Browser, cfg.General.Browser), os.Getenv("BROWSER"), defaultBrowserDesktop(), exec.LookPath)
 	if err != nil {
 		return err
 	}
 	url := "https://www.youtube.com/live_chat?is_popout=1&v=" + v.ID
-	cmd := exec.Command(browser.path, append(browser.args, url)...)
+	args := browser.args
+	if browser.newWindow {
+		args = append(slices.Clone(args), "--new-window")
+	}
+	cmd := exec.Command(browser.path, append(args, url)...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, io.Discard, io.Discard
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
@@ -184,6 +190,23 @@ func OpenYouTubeChat(v media.Video, cfg config.Config) error {
 			return strings.Contains(strings.ToLower(w.App), browser.name)
 		}, cfg.Chat.Workspace)
 	}
+	return nil
+}
+
+// OpenURL opens url in the browser (general.browser, $BROWSER, the desktop
+// default, then xdg-open), in a new tab where the browser has tabs.
+func OpenURL(url string, cfg config.Config) error {
+	browser, err := resolveBrowser(cfg.General.Browser, os.Getenv("BROWSER"), defaultBrowserDesktop(), exec.LookPath)
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(browser.path, append(slices.Clone(browser.args), url)...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, io.Discard, io.Discard
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("launch browser: %w", err)
+	}
+	go func() { _ = cmd.Wait() }()
 	return nil
 }
 
