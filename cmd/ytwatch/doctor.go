@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
 	"io"
 	"os"
@@ -78,6 +79,11 @@ func runDoctor(w io.Writer, cfg config.Config, p probe) int {
 		info(w, "thumbnails", "ueberzugpp not installed | no thumbnails (see the Optional list)")
 	default:
 		info(w, "thumbnails", "ueberzugpp, output: "+output)
+	}
+	if cfg.Search.Language == "" && cfg.Search.Region == "" {
+		info(w, "search", "language and region chosen by YouTube (set [search] in config.toml)")
+	} else {
+		info(w, "search", "language "+cmp.Or(cfg.Search.Language, "default")+", region "+cmp.Or(cfg.Search.Region, "default"))
 	}
 
 	missing := 0

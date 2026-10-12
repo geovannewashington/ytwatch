@@ -2,6 +2,7 @@ package youtube
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/geovannewashington/ytwatch/internal/locale"
 	"github.com/geovannewashington/ytwatch/internal/media"
 )
 
@@ -44,7 +46,7 @@ esac
 	defer cancel()
 	var mu sync.Mutex
 	var events []Event
-	Search(ctx, "Go interfaces", Filters{}, func(event Event) {
+	Search(ctx, "Go interfaces", Filters{}, locale.Locale{}, func(event Event) {
 		mu.Lock()
 		events = append(events, event)
 		mu.Unlock()
@@ -112,7 +114,7 @@ esac
 	defer cancel()
 	var mu sync.Mutex
 	rank := map[string]int{}
-	Search(ctx, "topic", Filters{}, func(event Event) {
+	Search(ctx, "topic", Filters{}, locale.Locale{}, func(event Event) {
 		if event.Kind == EventResult {
 			mu.Lock()
 			rank[event.Video.ID] = event.Rank
@@ -129,5 +131,38 @@ esac
 		if !aok || !bok || a >= b {
 			t.Fatalf("want %s (rank %d) above %s (rank %d); all ranks: %v", order[i-1], a, order[i], b, rank)
 		}
+	}
+}
+
+func TestSearchPassesTheLocaleToYtDlpAndTheShortsPage(t *testing.T) {
+	binDir := t.TempDir()
+	log := filepath.Join(binDir, "args.log")
+	script := "#!/bin/sh\necho \"$*\" >> " + log + "\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(binDir, "yt-dlp"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	old := fetchResultsPage
+	defer func() { fetchResultsPage = old }()
+	var pageURL, accept string
+	fetchResultsPage = func(_ context.Context, u string, loc locale.Locale) ([]byte, error) {
+		pageURL, accept = u, loc.AcceptLanguage()
+		return nil, errors.New("offline")
+	}
+
+	Search(context.Background(), "topic", Filters{}, locale.Locale{Language: "pt-BR", Region: "BR"}, func(Event) {})
+
+	data, _ := os.ReadFile(log)
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("expected the three searches to run yt-dlp, got %q", lines)
+	}
+	for _, line := range lines {
+		if !strings.Contains(line, "--extractor-args youtube:lang=pt-BR") || !strings.Contains(line, "--xff BR") {
+			t.Errorf("yt-dlp was run without the locale: %s", line)
+		}
+	}
+	if !strings.Contains(pageURL, "hl=pt-BR&gl=BR") || accept != "pt-BR,en;q=0.5" {
+		t.Errorf("the Shorts page was asked for with %q and Accept-Language %q", pageURL, accept)
 	}
 }

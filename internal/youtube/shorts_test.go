@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/geovannewashington/ytwatch/internal/locale"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,7 +44,7 @@ func TestParseShortsRejectsOtherPages(t *testing.T) {
 
 func init() {
 	// Tests never use the network. A test that needs a page sets its own.
-	fetchResultsPage = func(context.Context, string) ([]byte, error) {
+	fetchResultsPage = func(context.Context, string, locale.Locale) ([]byte, error) {
 		return nil, errors.New("offline")
 	}
 }
@@ -74,7 +75,7 @@ func TestSearchAddsShortsToAMixedSearch(t *testing.T) {
 	old := fetchResultsPage
 	defer func() { fetchResultsPage = old }()
 	var asked string
-	fetchResultsPage = func(_ context.Context, u string) ([]byte, error) {
+	fetchResultsPage = func(_ context.Context, u string, _ locale.Locale) ([]byte, error) {
 		asked = u
 		var b strings.Builder
 		b.WriteString(`<script>var ytInitialData = {"x":[`)
@@ -99,7 +100,7 @@ func TestSearchAddsShortsToAMixedSearch(t *testing.T) {
 
 	ranks := map[string]int{}
 	var mu sync.Mutex
-	Search(context.Background(), "ranking funny cat moment", Filters{}, func(e Event) {
+	Search(context.Background(), "ranking funny cat moment", Filters{}, locale.Locale{}, func(e Event) {
 		if e.Kind == EventResult {
 			mu.Lock()
 			ranks[e.Video.Title+"/"+e.Video.ID] = e.Rank

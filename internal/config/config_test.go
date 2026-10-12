@@ -204,3 +204,18 @@ func TestParseQuality(t *testing.T) {
 		t.Fatal("4k should be rejected")
 	}
 }
+
+func TestParseSearchLocale(t *testing.T) {
+	if d := Default().Search; d.Language != "" || d.Region != "" {
+		t.Fatalf("defaults: %+v", d)
+	}
+	cfg, err := Parse("[search]\nlanguage = \"pt-br\"\nregion = \"br\"\n")
+	if err != nil || cfg.Search.Language != "pt-BR" || cfg.Search.Region != "BR" {
+		t.Fatalf("search: %+v, err %v", cfg.Search, err)
+	}
+	for _, bad := range []string{"language = \"portuguese\"", "region = \"BRA\""} {
+		if _, err := Parse("[search]\n" + bad + "\n"); err == nil {
+			t.Errorf("%q should be rejected", bad)
+		}
+	}
+}

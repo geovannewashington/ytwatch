@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/geovannewashington/ytwatch/internal/locale"
 	"github.com/geovannewashington/ytwatch/internal/quality"
 	"github.com/geovannewashington/ytwatch/internal/theme"
 )
@@ -27,6 +28,7 @@ type Config struct {
 	Theme    Theme
 	Preview  Preview
 	History  History
+	Search   Search
 	// Links are the programs that open description links, tried in the order
 	// they appear in the file. See LinkHandler.
 	Links []LinkHandler
@@ -61,6 +63,16 @@ type Preview struct {
 	// terminal inside a Wayland session. kitty, sixel, iterm2 and chafa draw
 	// inside the terminal and also work over SSH.
 	Output string
+}
+
+// Search sets the language and region of YouTube searches. Both are optional;
+// when empty, YouTube decides from the connection.
+type Search struct {
+	// Language is a code such as "pt", "ja" or "pt-BR".
+	Language string
+	// Region is a two-letter country code such as "BR". yt-dlp sends it as a
+	// fake X-Forwarded-For address, which YouTube may ignore.
+	Region string
 }
 
 // History configures the list of past searches, which Up and Down walk through
@@ -240,6 +252,16 @@ func (c *Config) set(section, key, raw string) error {
 		c.MPV.CookiesFromBrowser, err = parseString(raw)
 	case "mpv.args":
 		c.MPV.Args, err = parseStringArray(raw)
+	case "search.language":
+		var value string
+		if value, err = parseString(raw); err == nil {
+			c.Search.Language, err = locale.NormalizeLanguage(value)
+		}
+	case "search.region":
+		var value string
+		if value, err = parseString(raw); err == nil {
+			c.Search.Region, err = locale.NormalizeRegion(value)
+		}
 	case "history.enabled":
 		c.History.Enabled, err = strconv.ParseBool(raw)
 	case "history.max_age_days":

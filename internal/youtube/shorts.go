@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/geovannewashington/ytwatch/internal/locale"
 	"github.com/geovannewashington/ytwatch/internal/media"
 )
 
@@ -25,10 +26,13 @@ const initialDataMarker = "var ytInitialData = "
 
 // shortsURL is the results page for a Shorts search. The parameter is escaped
 // once here, because it is not passed through yt-dlp.
-func shortsURL(query string, f Filters) string {
+func shortsURL(query string, f Filters, loc locale.Locale) string {
 	u := "https://www.youtube.com/results?search_query=" + url.QueryEscape(query)
 	if param := f.Param(); param != "" {
 		u += "&sp=" + url.QueryEscape(param)
+	}
+	if params := loc.PageParams(); params != "" {
+		u += "&" + params
 	}
 	return u
 }
@@ -163,13 +167,13 @@ func containsAll(title string, words []string) bool {
 
 // fetchResultsPage downloads a results page. It is a variable so that tests do
 // not use the network.
-var fetchResultsPage = func(ctx context.Context, pageURL string) ([]byte, error) {
+var fetchResultsPage = func(ctx context.Context, pageURL string, loc locale.Locale) ([]byte, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	request.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0")
-	request.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	request.Header.Set("Accept-Language", loc.AcceptLanguage())
 	// Skips the cookie consent page that some regions get.
 	request.Header.Set("Cookie", "SOCS=CAI")
 	client := &http.Client{Timeout: 15 * time.Second}
@@ -191,6 +195,7 @@ func runShortsQuery(
 	ctx context.Context,
 	query string,
 	f Filters,
+	loc locale.Locale,
 	limit int,
 	rank func(position int, title string) int,
 	seen *sync.Map,
@@ -198,7 +203,7 @@ func runShortsQuery(
 	jobs chan<- media.Video,
 	emit func(Event),
 ) queryResult {
-	page, err := fetchResultsPage(ctx, shortsURL(query, f))
+	page, err := fetchResultsPage(ctx, shortsURL(query, f, loc), loc)
 	if err != nil {
 		return queryResult{err: err}
 	}

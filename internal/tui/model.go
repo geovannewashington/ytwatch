@@ -19,6 +19,7 @@ import (
 	"github.com/geovannewashington/ytwatch/internal/download"
 	"github.com/geovannewashington/ytwatch/internal/history"
 	"github.com/geovannewashington/ytwatch/internal/links"
+	"github.com/geovannewashington/ytwatch/internal/locale"
 	"github.com/geovannewashington/ytwatch/internal/media"
 	"github.com/geovannewashington/ytwatch/internal/player"
 	"github.com/geovannewashington/ytwatch/internal/preview"
@@ -240,6 +241,7 @@ func (m *Model) beginSearch(query string) tea.Cmd {
 
 	ctx, cancel := context.WithCancel(m.ctx)
 	filters := m.filters
+	loc := locale.Locale{Language: m.cfg.Search.Language, Region: m.cfg.Search.Region}
 	m.searchCancel = cancel
 	m.generation++
 	generation := m.generation
@@ -266,7 +268,7 @@ func (m *Model) beginSearch(query string) tea.Cmd {
 		events := make(chan youtube.Event, 256)
 		go func() {
 			defer close(events)
-			youtube.Search(ctx, query, filters, func(event youtube.Event) {
+			youtube.Search(ctx, query, filters, loc, func(event youtube.Event) {
 				select {
 				case events <- event:
 				case <-ctx.Done():
