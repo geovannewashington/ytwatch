@@ -132,12 +132,26 @@ func fetchImage(ctx context.Context, thumbURL string) ([]byte, error) {
 }
 
 type Overlay struct {
+	output string // ueberzugpp --output value; empty lets ueberzugpp choose
+	off    bool   // thumbnails are switched off in the config
+
 	mu     sync.Mutex
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
 	done   chan error
 	active bool
 }
+
+// Configure applies the [preview] output setting: "auto", "off", or an
+// ueberzugpp output such as "x11".
+func (o *Overlay) Configure(setting string) {
+	var enabled bool
+	o.output, enabled = ResolveOutput(setting, os.Getenv)
+	o.off = !enabled
+}
+
+// Disabled reports whether thumbnails are switched off in the config.
+func (o *Overlay) Disabled() bool { return o.off }
 
 func Available() bool {
 	_, err := exec.LookPath("ueberzugpp")
@@ -162,7 +176,11 @@ func (o *Overlay) startLocked() bool {
 	if err != nil {
 		return false
 	}
-	cmd := exec.Command(path, "layer", "--output", "wayland")
+	args := []string{"layer"}
+	if o.output != "" {
+		args = append(args, "--output", o.output)
+	}
+	cmd := exec.Command(path, args...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return false

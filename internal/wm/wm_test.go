@@ -166,3 +166,19 @@ func TestDetectSkipsX11OnWayland(t *testing.T) {
 		t.Fatal("want nil backend on Wayland without a native backend")
 	}
 }
+
+func TestName(t *testing.T) {
+	for want, b := range map[string]Backend{
+		"sway":                   swayLike{bin: "swaymsg"},
+		"i3":                     swayLike{bin: "i3-msg"},
+		"Hyprland":               hyprland{},
+		"niri":                   niri{},
+		"bspwm":                  bspwm{},
+		"X11 (EWMH, via wmctrl)": ewmh{},
+		"":                       nil,
+	} {
+		if got := Name(b); got != want {
+			t.Errorf("Name(%T) = %q, want %q", b, got, want)
+		}
+	}
+}

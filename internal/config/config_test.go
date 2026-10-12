@@ -160,3 +160,18 @@ func TestCommentsInsideSingleQuotesAreKept(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestParsePreviewOutput(t *testing.T) {
+	cfg, err := Parse("[preview]\noutput = \"X11\"\n")
+	if err != nil || cfg.Preview.Output != "x11" {
+		t.Fatalf("got %+v, %v", cfg.Preview, err)
+	}
+	for _, ok := range []string{"auto", "off", "wayland", "sixel", "kitty", "iterm2", "chafa"} {
+		if _, err := Parse("[preview]\noutput = \"" + ok + "\"\n"); err != nil {
+			t.Errorf("%s should be accepted: %v", ok, err)
+		}
+	}
+	if _, err := Parse("[preview]\noutput = \"fbdev\"\n"); err == nil {
+		t.Fatal("unknown output should fail")
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -105,4 +106,22 @@ func MoveNew(b Backend, before map[string]Window, match func(Window) bool, works
 		case <-time.After(pollInterval):
 		}
 	}
+}
+
+// Name describes a backend for messages, such as "sway" or "Hyprland". It is
+// empty for a nil backend.
+func Name(b Backend) string {
+	switch v := b.(type) {
+	case swayLike:
+		return strings.TrimSuffix(strings.TrimSuffix(v.bin, "msg"), "-")
+	case hyprland:
+		return "Hyprland"
+	case niri:
+		return "niri"
+	case bspwm:
+		return "bspwm"
+	case ewmh:
+		return "X11 (EWMH, via wmctrl)"
+	}
+	return ""
 }

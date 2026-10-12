@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
@@ -208,6 +209,15 @@ func OpenURL(url string, cfg config.Config) error {
 	}
 	go func() { _ = cmd.Wait() }()
 	return nil
+}
+
+// DescribeBrowser names the browser OpenURL would use, for ytwatch doctor.
+func DescribeBrowser(cfg config.Config) string {
+	b, err := resolveBrowser(cfg.General.Browser, os.Getenv("BROWSER"), defaultBrowserDesktop(), exec.LookPath)
+	if err != nil {
+		return ""
+	}
+	return filepath.Base(b.path)
 }
 
 func validID(id string) bool {

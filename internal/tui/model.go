@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/geovannewashington/ytwatch/internal/clipboard"
 	"github.com/geovannewashington/ytwatch/internal/config"
 	"github.com/geovannewashington/ytwatch/internal/download"
 	"github.com/geovannewashington/ytwatch/internal/links"
@@ -165,6 +165,7 @@ func New(initialQuery string) *Model {
 func (m *Model) SetConfig(cfg config.Config) {
 	m.cfg = cfg
 	m.audioOnly = cfg.General.AudioOnly
+	m.overlay.Configure(cfg.Preview.Output)
 	// The config parser already checked the theme, so this only fails for a
 	// config built in code; the built-in theme stays then.
 	if t, err := theme.Resolve(cfg.Theme.Name, cfg.Theme.Colors); err == nil {
@@ -751,17 +752,10 @@ func (m *Model) copyLink(hasCount bool, n int) tea.Cmd {
 	if !ok {
 		return nil
 	}
-	if _, err := exec.LookPath("wl-copy"); err != nil {
-		m.status = "wl-copy not found | install wl-clipboard"
+	if err := clipboard.Copy(url); err != nil {
+		m.status = clean(err.Error())
 		return nil
 	}
-	cmd := exec.Command("wl-copy")
-	cmd.Stdin = strings.NewReader(url)
-	if err := cmd.Start(); err != nil {
-		m.status = "Could not copy URL: " + err.Error()
-		return nil
-	}
-	go func() { _ = cmd.Wait() }()
 	if hasCount {
 		m.status = fmt.Sprintf("Copied link %d", n)
 	} else {
@@ -854,7 +848,7 @@ func (m *Model) scheduleThumbnail() tea.Cmd {
 		m.thumbCancel = nil
 	}
 	m.thumbLoadingID = ""
-	if !ok || m.width < wideWidth || !preview.Available() {
+	if !ok || m.width < wideWidth || !m.thumbnailsOn() {
 		m.overlay.Remove()
 		return nil
 	}
@@ -927,7 +921,18 @@ func (m *Model) paneWidths() (results, preview int) {
 	return results, preview
 }
 
+// thumbnailsOn reports whether thumbnails can be drawn: they are not switched
+// off in the config and ueberzugpp is installed.
+func (m *Model) thumbnailsOn() bool {
+	return !m.overlay.Disabled() && preview.Available()
+}
+
+// thumbRows is the height reserved for the thumbnail. It is zero when
+// thumbnails are switched off, so the preview text uses the space.
 func (m *Model) thumbRows() int {
+	if m.overlay.Disabled() {
+		return 0
+	}
 	return max(0, min(8, m.bodyHeight()-10))
 }
 
@@ -959,7 +964,7 @@ func (m *Model) showSelectedThumbnail() {
 		return
 	}
 	if !m.overlay.Show(path, leftWidth+2, y, rightWidth, thumbRows) {
-		m.status = "Thumbnail overlay unavailable | check ueberzugpp/Wayland support"
+		m.status = "Thumbnail overlay unavailable | check ueberzugpp or set [preview] output in config.toml"
 	}
 }
 

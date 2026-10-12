@@ -18,6 +18,7 @@ const usage = `ytwatch - YouTube search TUI
 
 Usage:
   ytwatch [search query]
+  ytwatch doctor          check the programs and session ytwatch uses
 
 Examples:
   ytwatch
@@ -26,10 +27,12 @@ Examples:
 
 Dependencies:
   yt-dlp, mpv
-  Optional: ueberzugpp (thumbnails), a web browser (live chat), wl-clipboard (copy URL),
-    wmctrl (workspace placement on X11)
+  Optional: ueberzugpp (thumbnails), a web browser (links, live chat),
+    wl-clipboard (Wayland) or xclip / xsel (X11) for copying,
+    wmctrl (workspace placement on X11), ffmpeg (merging downloads)
 
-Config: ~/.config/ytwatch/config.toml (workspaces, mpv args, download folder)
+Config: ~/.config/ytwatch/config.toml (theme, workspaces, mpv args,
+  download folder, link handlers, thumbnail output)
 
 Inside ytwatch, press ? for keyboard help.`
 
@@ -43,12 +46,22 @@ func main() {
 		fmt.Printf("ytwatch %s\n", version)
 		return
 	}
+	if len(args) == 1 && (args[0] == "doctor" || args[0] == "--doctor") {
+		cfg, err := config.Load()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ytwatch: config error:", err)
+			cfg = config.Default()
+		}
+		os.Exit(runDoctor(os.Stdout, cfg, systemProbe()))
+	}
 	if len(args) > 0 && args[0] == "-s" {
 		args = args[1:]
 	}
 	query := strings.TrimSpace(strings.Join(args, " "))
 	if _, err := exec.LookPath("yt-dlp"); err != nil {
-		fmt.Fprintln(os.Stderr, "ytwatch: yt-dlp is required. Install it with your package manager (for example: sudo pacman -S yt-dlp)")
+		fmt.Fprintln(os.Stderr, "ytwatch: yt-dlp is required. Install it with your package manager (pacman -S yt-dlp, dnf install yt-dlp, brew install yt-dlp) or pipx install yt-dlp.")
+		fmt.Fprintln(os.Stderr, "On Debian and Ubuntu the packaged yt-dlp is often too old for YouTube, so prefer pipx or the release binary.")
+		fmt.Fprintln(os.Stderr, "Run 'ytwatch doctor' to check everything ytwatch needs.")
 		os.Exit(1)
 	}
 

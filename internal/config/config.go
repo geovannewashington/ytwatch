@@ -24,6 +24,7 @@ type Config struct {
 	Chat     Chat
 	Download Download
 	Theme    Theme
+	Preview  Preview
 	// Links are the programs that open description links, tried in the order
 	// they appear in the file. See LinkHandler.
 	Links []LinkHandler
@@ -43,6 +44,21 @@ type LinkHandler struct {
 	Name    string
 	Match   *regexp.Regexp
 	Command []string
+}
+
+// PreviewOutputs are the accepted values of [preview] output besides "auto"
+// and "off". They are the output methods of ueberzugpp.
+var PreviewOutputs = []string{"x11", "wayland", "sixel", "kitty", "iterm2", "chafa"}
+
+// Preview configures the thumbnail overlay.
+type Preview struct {
+	// Output is how thumbnails are drawn by ueberzugpp. "auto" (the default)
+	// follows the session: wayland, x11, or a terminal protocol when there is
+	// no display server. "off" shows no thumbnails. Set x11 or wayland when the
+	// terminal runs under the other kind of server, for example an X11
+	// terminal inside a Wayland session. kitty, sixel, iterm2 and chafa draw
+	// inside the terminal and also work over SSH.
+	Output string
 }
 
 // Theme selects the colours. Name is a preset (see package theme) and Colors
@@ -174,6 +190,16 @@ func (c *Config) set(section, key, raw string) error {
 	}
 	var err error
 	switch section + "." + key {
+	case "preview.output":
+		var value string
+		value, err = parseString(raw)
+		if err == nil {
+			value = strings.ToLower(value)
+			if value != "auto" && value != "off" && !slices.Contains(PreviewOutputs, value) {
+				return fmt.Errorf("invalid preview output %q (auto, off, %s)", value, strings.Join(PreviewOutputs, ", "))
+			}
+			c.Preview.Output = value
+		}
 	case "general.browser":
 		c.General.Browser, err = parseString(raw)
 	case "general.audio_only":
