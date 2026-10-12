@@ -1519,14 +1519,7 @@ func (m *Model) renderResultLines(width, height int) string {
 	}
 
 	if len(m.items) == 0 {
-		message := "Type a query to search YouTube"
-		if m.searching {
-			message = "Searching videos and live streams..."
-		}
-		if m.searchError != "" {
-			message = truncate("Search failed: "+m.searchError, width)
-		}
-		lines = append(lines, subtitleStyle.Render(truncate(message, width)))
+		lines = append(lines, m.renderEmptyList(width, height)...)
 	} else if end < len(m.items) {
 		lines = append(lines, metaStyle.Render(truncate(fmt.Sprintf("  v %d more results", len(m.items)-end), width)))
 	}
@@ -1537,6 +1530,34 @@ func (m *Model) renderResultLines(width, height int) string {
 		lines = lines[:height]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// renderEmptyList is what the results pane shows without results: Watchy and a
+// line that says what is going on. In a pane too small for him it is just the
+// line.
+func (m *Model) renderEmptyList(width, height int) []string {
+	message, mood := "Press / to search YouTube", moodIdle
+	switch {
+	case m.searchError != "":
+		message, mood = "Search failed: "+m.searchError, moodSad
+	case m.searching && len(m.parents) > 0:
+		message, mood = "Opening the playlist...", moodSearching
+	case m.searching:
+		message, mood = "Searching videos, Shorts and live streams...", moodSearching
+	case m.searchDone:
+		message, mood = "No results. Press / to search again or f to change the filters", moodSad
+	}
+	caption := subtitleStyle.Render(truncate(message, width))
+	if height < mascotHeight+4 || width < mascotWidth+2 {
+		return []string{caption}
+	}
+	var lines []string
+	for i := 0; i < (height-mascotHeight-3)/3; i++ {
+		lines = append(lines, "")
+	}
+	lines = append(lines, renderMascot(width, mood, time.Now())...)
+	lines = append(lines, "", lipgloss.PlaceHorizontal(width, lipgloss.Center, caption))
+	return lines
 }
 
 // streamSection describes the stream state of a video in the preview. The
