@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/geovannewashington/ytwatch/internal/media"
 )
@@ -96,5 +97,30 @@ func TestVimCountsAndFirstLastMotions(t *testing.T) {
 	m.handleKey(runeKey('G'))
 	if m.selected != len(m.items)-1 {
 		t.Fatalf("G selected index %d, want last index %d", m.selected, len(m.items)-1)
+	}
+}
+
+func TestResultRowsKeepTheirWidthWithBadgesAndPlayback(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 120, 30
+	m.items = []media.Video{
+		{ID: "video0001", Title: "Plain video"},
+		{ID: "video0002", Title: "A very long live stream title that must be cut to fit", IsLive: true},
+		{ID: "video0003", Title: "Short clip", Short: true},
+		{ID: "video0004", Title: "Past stream", WasLive: true},
+	}
+	m.playing["video0002"] = "playing"
+	const width = 40
+
+	rows := strings.Split(m.renderResultLines(width, 12), "\n")
+	for i, row := range rows {
+		if got := lipgloss.Width(row); got > width {
+			t.Fatalf("row %d width = %d, want at most %d: %q", i, got, width, row)
+		}
+	}
+	for _, label := range []string{"LIVE", "SHORT", "VOD"} {
+		if !strings.Contains(strings.Join(rows, "\n"), label) {
+			t.Fatalf("missing %s badge in rows", label)
+		}
 	}
 }

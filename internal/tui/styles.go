@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // Low-contrast green palette in the spirit of Everforest. Body text uses the
 // terminal's own foreground; only accents and the selected title are coloured.
@@ -31,9 +35,22 @@ var (
 	shortBadgeStyle    = lipgloss.NewStyle().Foreground(yellow).Bold(true)
 	upcomingBadgeStyle = lipgloss.NewStyle().Foreground(aqua).Bold(true)
 	pastLiveBadgeStyle = lipgloss.NewStyle().Foreground(orange).Bold(true)
+	playingStyle       = lipgloss.NewStyle().Foreground(green).Bold(true)
 	panelStyle         = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(borderGrey).Padding(0, 1)
 	activePanelStyle   = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(green).Padding(0, 1)
 	footerStyle        = lipgloss.NewStyle().Foreground(grey)
 	helpBoxStyle       = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(green).Padding(1, 2)
 	keyStyle           = lipgloss.NewStyle().Foreground(aqua)
 )
+
+// eqFrames is one bar of the playing equalizer over time.
+var eqFrames = []string{"▁", "▃", "▅", "▇", "▅", "▃"}
+
+// equalizer renders n bars that move out of phase, so playback looks alive.
+func equalizer(frame, n int) string {
+	var b strings.Builder
+	for i := 0; i < n; i++ {
+		b.WriteString(eqFrames[(frame+i*2)%len(eqFrames)])
+	}
+	return playingStyle.Render(b.String())
+}

@@ -327,7 +327,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.animating = false
 			return m, nil
 		}
-		m.spinnerFrame = (m.spinnerFrame + 1) % 4
+		m.spinnerFrame = (m.spinnerFrame + 1) % len(eqFrames)
 		return m, tickAnimation()
 
 	case tea.KeyMsg:
@@ -373,7 +373,7 @@ func (m *Model) handleSearchEvent(event youtube.Event) []tea.Cmd {
 		if _, isPlaying := m.playing[event.Video.ID]; isPlaying && event.Video.IsCurrentlyLive() && !m.chatOpened[event.Video.ID] {
 			if err := player.OpenYouTubeChat(event.Video, m.cfg); err == nil {
 				m.chatOpened[event.Video.ID] = true
-				m.status = "🔴 Live stream | opened YouTube chat"
+				m.status = "📡 Live stream | opened YouTube chat"
 			}
 		}
 		if m.selectedID() == event.Video.ID && m.thumbnailPaths[event.Video.ID] == "" && m.thumbLoadingID != event.Video.ID {
@@ -853,9 +853,9 @@ func (m *Model) playSelected() tea.Cmd {
 	if v.IsCurrentlyLive() {
 		if err := player.OpenYouTubeChat(v, m.cfg); err == nil {
 			m.chatOpened[v.ID] = true
-			m.status = "🔴 Live stream | opened chat"
+			m.status = "📡 Live stream | opened chat"
 		} else {
-			m.status = "🔴 Live stream | " + err.Error()
+			m.status = "📡 Live stream | " + err.Error()
 		}
 	}
 	cmds := []tea.Cmd{waitForPlayer(cmd, v.ID)}
@@ -954,25 +954,28 @@ func (m *Model) renderResultLines(width, height int) string {
 			cursor = "> "
 		}
 
-		label, badgeStyle := badgeInfo(v)
-		badgeWidth := lipgloss.Width(label)
+		badge := ""
+		if label, style := badgeInfo(v); label != "" {
+			badge = style.Render(label)
+		}
 		leftWidth := width
-		if label != "" {
-			leftWidth = max(2, width-badgeWidth-1)
+		if badge != "" {
+			leftWidth = max(2, width-lipgloss.Width(badge)-1)
 		}
-		plainLeft := padToWidth(cursor+truncate(clean(v.Title), max(1, leftWidth-lipgloss.Width(cursor))), leftWidth)
+		titleStyle := normalTitleStyle
 		if selected {
-			line := plainLeft
-			if label != "" {
-				line += " " + label
-			}
-			lines = append(lines, selectedTitleStyle.Render(line))
-		} else {
-			lines = append(lines, normalTitleStyle.Render(plainLeft))
-			if label != "" {
-				lines[len(lines)-1] += metaStyle.Render(" ") + badgeStyle.Render(label)
-			}
+			titleStyle = selectedTitleStyle
 		}
+		marker := titleStyle.Render(cursor)
+		if _, isPlaying := m.playing[v.ID]; isPlaying {
+			marker = equalizer(m.spinnerFrame, 1) + " "
+		}
+		title := padToWidth(truncate(clean(v.Title), max(1, leftWidth-2)), leftWidth-2)
+		line := marker + titleStyle.Render(title)
+		if badge != "" {
+			line += " " + badge
+		}
+		lines = append(lines, line)
 
 		meta := clean(v.ChannelName()) + " | " + v.DurationText()
 		if v.IsCurrentlyLive() {
@@ -1022,7 +1025,7 @@ func (m *Model) renderResultLines(width, height int) string {
 func (m *Model) streamSection(v media.Video) ([]string, lipgloss.Style) {
 	switch v.Kind() {
 	case media.KindLive:
-		head := "🔴 LIVE NOW"
+		head := "📡 LIVE NOW"
 		if v.ConcurrentViewers > 0 {
 			head += "  " + v.ViewsText()
 		}
@@ -1111,18 +1114,20 @@ func (m *Model) renderPreview(width, height int) string {
 }
 func (m *Model) renderFooter() string {
 	status := m.status
+	prefix := ""
 	if len(m.playing) > 0 {
-		frames := []string{"⠋", "⠙", "⠹", "⠸"}
-		status = frames[m.spinnerFrame%len(frames)] + " Playing " + strconv.Itoa(len(m.playing)) + " video(s)"
+		prefix = equalizer(m.spinnerFrame, 3) + " "
+		status = "Playing " + strconv.Itoa(len(m.playing)) + " video(s)"
 	}
 	style := statusStyle
 	if m.searchError != "" && len(m.items) == 0 {
 		status = m.searchError
 		style = errorStyle
+		prefix = ""
 	}
 	right := footerStyle.Render(fmt.Sprintf("%d/%d", min(m.selected+1, len(m.items)), len(m.items)))
-	leftWidth := max(10, m.width-lipgloss.Width(right)-2)
-	left := style.Render(padToWidth(truncate(status, leftWidth), leftWidth))
+	leftWidth := max(10, m.width-lipgloss.Width(right)-2-lipgloss.Width(prefix))
+	left := prefix + style.Render(padToWidth(truncate(status, leftWidth), leftWidth))
 	return left + "  " + right
 }
 
@@ -1162,7 +1167,7 @@ func (m *Model) renderHelp() string {
 func badgeInfo(v media.Video) (string, lipgloss.Style) {
 	switch v.Kind() {
 	case media.KindLive:
-		return "🔴 LIVE", liveBadgeStyle
+		return "📡 LIVE", liveBadgeStyle
 	case media.KindUpcoming:
 		return "⏳ UPCOMING", upcomingBadgeStyle
 	case media.KindPastLive:

@@ -122,23 +122,6 @@ func (v Video) Kind() Kind {
 	}
 }
 
-// Badge returns a small status label; ordinary videos are deliberately not
-// prefixed with a noisy VIDEO label.
-func (v Video) Badge() string {
-	switch v.Kind() {
-	case KindLive:
-		return "🔴 LIVE"
-	case KindUpcoming:
-		return "⏳ UPCOMING"
-	case KindPastLive:
-		return "📼 LIVE VOD"
-	case KindShort:
-		return "⚡ SHORT"
-	default:
-		return ""
-	}
-}
-
 func (v Video) DurationText() string {
 	if v.IsCurrentlyLive() {
 		if v.ConcurrentViewers > 0 {
