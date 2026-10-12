@@ -723,3 +723,81 @@ func TestDescriptionKeepsItsBlankLinesInThePreview(t *testing.T) {
 	}
 	t.Fatalf("description not found:\n%s", out)
 }
+
+func playlistVideo() media.Video {
+	return media.Video{ID: "PLplaylist0001", Title: "My playlist", URL: "https://www.youtube.com/playlist?list=PLplaylist0001", PlaylistCount: 12}
+}
+
+func TestEnterOpensAPlaylistAndEscComesBack(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 120, 30
+	m.items = []media.Video{{ID: "video0001", Title: "One"}, playlistVideo(), {ID: "video0003", Title: "Three"}}
+	m.ranks = []int{0, 10, 20}
+	m.selected, m.top = 1, 0
+	m.searchDone, m.metadataDone = true, true
+
+	cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil || len(m.parents) != 1 || m.listTitle != "My playlist" {
+		t.Fatalf("Enter should open the playlist: cmd=%v parents=%d title=%q", cmd != nil, len(m.parents), m.listTitle)
+	}
+	if len(m.items) != 0 || !m.searching {
+		t.Fatalf("the list should be empty while the playlist loads: %d items, searching=%v", len(m.items), m.searching)
+	}
+	if !strings.Contains(m.renderHeader(), "My playlist") || !strings.Contains(m.renderHeader(), "test") {
+		t.Fatalf("the header should show where you are:\n%s", m.renderHeader())
+	}
+	if !strings.Contains(m.renderHeader(), "Esc back") {
+		t.Fatalf("the header should say how to go back:\n%s", m.renderHeader())
+	}
+	// Videos of the playlist arrive.
+	m.handleSearchEvent(youtube.Event{Kind: youtube.EventResult, Video: media.Video{ID: "inside0001", Title: "Inside"}, Rank: 0})
+	if len(m.items) != 1 {
+		t.Fatal("the video should be listed")
+	}
+	// Enter on a video plays it and does not open anything.
+	generation := m.generation
+
+	m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if len(m.parents) != 0 || m.listTitle != "" || len(m.items) != 3 || m.selected != 1 {
+		t.Fatalf("Esc should restore the results: parents=%d title=%q items=%d selected=%d", len(m.parents), m.listTitle, len(m.items), m.selected)
+	}
+	if m.generation == generation {
+		t.Fatal("events of the closed playlist must be ignored")
+	}
+	if m.searching || m.status != "3 results" {
+		t.Fatalf("searching=%v status=%q", m.searching, m.status)
+	}
+	// Esc with nothing open does nothing special.
+	m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if len(m.items) != 3 {
+		t.Fatal("Esc must not clear the results")
+	}
+	m.cancel()
+}
+
+func TestEscInVisualModeEndsTheSelectionBeforeLeavingAPlaylist(t *testing.T) {
+	m := New("test")
+	m.items = []media.Video{{ID: "video0001", Title: "One"}}
+	m.parents = []resultsState{{items: []media.Video{playlistVideo()}, ranks: []int{0}}}
+	m.listTitle = "My playlist"
+	m.handleKey(runeKey('V'))
+	m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.visual || len(m.parents) != 1 {
+		t.Fatalf("the first Esc should only end the selection: visual=%v parents=%d", m.visual, len(m.parents))
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if len(m.parents) != 0 {
+		t.Fatal("the second Esc should leave the playlist")
+	}
+}
+
+func TestANewSearchLeavesTheOpenPlaylist(t *testing.T) {
+	m := New("test")
+	m.parents = []resultsState{{}}
+	m.listTitle = "My playlist"
+	m.beginSearch("something else")
+	m.cancel()
+	if len(m.parents) != 0 || m.listTitle != "" {
+		t.Fatal("a new search should leave the playlist")
+	}
+}

@@ -67,6 +67,11 @@ var (
 	liveRanking     = ranking{base: 360, step: 10, onlyLive: true}
 )
 
+var (
+	errNoVideos       = errors.New("no videos found in this playlist")
+	errBrowseTimedOut = errors.New("loading timed out; showing the videos found so far")
+)
+
 type queryResult struct {
 	rows int
 	err  error
@@ -90,44 +95,7 @@ func Search(ctx context.Context, query string, filters Filters, loc locale.Local
 
 	regularJobs := make(chan media.Video, videoResultCount)
 	liveJobs := make(chan media.Video, liveResultCount)
-	var workers sync.WaitGroup
-	for i := 0; i < metadataWorkers; i++ {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
-			regular := (<-chan media.Video)(regularJobs)
-			live := (<-chan media.Video)(liveJobs)
-			for regular != nil || live != nil {
-				// Prefer live-search candidates so their status is resolved early.
-				select {
-				case v, ok := <-live:
-					if !ok {
-						live = nil
-						continue
-					}
-					resolveDetails(ctx, v, loc, emit)
-					continue
-				default:
-				}
-				select {
-				case <-ctx.Done():
-					return
-				case v, ok := <-live:
-					if !ok {
-						live = nil
-					} else {
-						resolveDetails(ctx, v, loc, emit)
-					}
-				case v, ok := <-regular:
-					if !ok {
-						regular = nil
-					} else {
-						resolveDetails(ctx, v, loc, emit)
-					}
-				}
-			}
-		}()
-	}
+	workers := startDetailWorkers(ctx, regularJobs, liveJobs, loc, emit)
 
 	var seen sync.Map
 	var uniqueCount atomic.Int64
@@ -207,6 +175,51 @@ func Search(ctx context.Context, query string, filters Filters, loc locale.Local
 	emit(Event{Kind: EventDetailsEnd, Count: int(uniqueCount.Load())})
 }
 
+// startDetailWorkers starts the bounded pool that looks up richer metadata for
+// results: stream status, Shorts, description and age. Jobs on live are served
+// first. The pool ends when both channels are closed and empty.
+func startDetailWorkers(ctx context.Context, regularJobs, liveJobs <-chan media.Video, loc locale.Locale, emit func(Event)) *sync.WaitGroup {
+	var workers sync.WaitGroup
+	for i := 0; i < metadataWorkers; i++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			regular := regularJobs
+			live := liveJobs
+			for regular != nil || live != nil {
+				// Prefer live-search candidates so their status is resolved early.
+				select {
+				case v, ok := <-live:
+					if !ok {
+						live = nil
+						continue
+					}
+					resolveDetails(ctx, v, loc, emit)
+					continue
+				default:
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case v, ok := <-live:
+					if !ok {
+						live = nil
+					} else {
+						resolveDetails(ctx, v, loc, emit)
+					}
+				case v, ok := <-regular:
+					if !ok {
+						regular = nil
+					} else {
+						resolveDetails(ctx, v, loc, emit)
+					}
+				}
+			}
+		}()
+	}
+	return &workers
+}
+
 // runQuery runs one yt-dlp search and streams its results. source is a
 // "ytsearchN:query" spec or a results-page URL; listEnd limits how many
 // entries a URL returns (a ytsearch spec carries its own count, so it is 0).
@@ -258,6 +271,9 @@ func runQuery(
 		}
 		position := rows
 		rows++
+		if unavailable(video.Title) {
+			continue
+		}
 		if order.onlyLive && !video.IsCurrentlyLive() && !video.IsUpcoming() {
 			continue
 		}

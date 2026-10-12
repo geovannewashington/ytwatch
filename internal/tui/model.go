@@ -99,8 +99,10 @@ type Model struct {
 	showFilters  bool
 	quality      string // see package quality
 	showQuality  bool
-	visual       bool // a line selection is active (V)
-	visualAnchor int  // where the selection started
+	visual       bool           // a line selection is active (V)
+	parents      []resultsState // the results to go back to from an open playlist
+	listTitle    string         // title of the open playlist, empty for search results
+	visualAnchor int            // where the selection started
 	qualityDraft int
 	filterDraft  youtube.Filters // edited in the menu, applied with Enter
 	filterCol    int
@@ -229,6 +231,28 @@ func (m *Model) beginSearch(query string) tea.Cmd {
 		m.status = "Enter a search query"
 		return nil
 	}
+	filters := m.filters
+	loc := m.locale()
+	m.query = query
+	m.setInput(query)
+	m.searchMode = false
+	m.parents, m.listTitle = nil, ""
+	if m.history != nil {
+		m.history.Add(query, time.Now())
+	}
+	return m.startStream("Searching YouTube...", func(ctx context.Context, emit func(youtube.Event)) {
+		youtube.Search(ctx, query, filters, loc, emit)
+	})
+}
+
+// locale is the search language and region from the config.
+func (m *Model) locale() locale.Locale {
+	return locale.Locale{Language: m.cfg.Search.Language, Region: m.cfg.Search.Region}
+}
+
+// startStream clears the list and starts run, which sends its results to the
+// list as events. It stops the stream that was running before.
+func (m *Model) startStream(status string, run func(ctx context.Context, emit func(youtube.Event))) tea.Cmd {
 	if m.searchCancel != nil {
 		m.searchCancel()
 	}
@@ -240,18 +264,10 @@ func (m *Model) beginSearch(query string) tea.Cmd {
 	m.overlay.Remove()
 
 	ctx, cancel := context.WithCancel(m.ctx)
-	filters := m.filters
-	loc := locale.Locale{Language: m.cfg.Search.Language, Region: m.cfg.Search.Region}
 	m.searchCancel = cancel
 	m.generation++
 	generation := m.generation
-	m.query = query
-	m.setInput(query)
-	m.searchMode = false
 	m.endVisual()
-	if m.history != nil {
-		m.history.Add(query, time.Now())
-	}
 	m.searching = true
 	m.searchDone = false
 	m.metadataDone = false
@@ -262,13 +278,13 @@ func (m *Model) beginSearch(query string) tea.Cmd {
 	m.countPrefix = ""
 	m.pendingG = false
 	m.thumbSequence++
-	m.status = "Searching YouTube..."
+	m.status = status
 
 	return func() tea.Msg {
 		events := make(chan youtube.Event, 256)
 		go func() {
 			defer close(events)
-			youtube.Search(ctx, query, filters, loc, func(event youtube.Event) {
+			run(ctx, func(event youtube.Event) {
 				select {
 				case events <- event:
 				case <-ctx.Done():
@@ -277,6 +293,56 @@ func (m *Model) beginSearch(query string) tea.Cmd {
 		}()
 		return searchStartedMsg{generation: generation, events: events}
 	}
+}
+
+// resultsStatus counts what the list shows.
+func (m *Model) resultsStatus() string {
+	if m.listTitle != "" {
+		return fmt.Sprintf("%d videos | Esc goes back", len(m.items))
+	}
+	return fmt.Sprintf("%d results", len(m.items))
+}
+
+// resultsState is a list of results that can be returned to.
+type resultsState struct {
+	items         []media.Video
+	ranks         []int
+	selected, top int
+	title         string
+}
+
+// openPlaylist lists the videos of playlist v. Esc returns to the results.
+func (m *Model) openPlaylist(v media.Video) tea.Cmd {
+	url := v.CanonicalURL()
+	if url == "" {
+		m.status = "This playlist has no link"
+		return nil
+	}
+	m.parents = append(m.parents, resultsState{m.items, m.ranks, m.selected, m.top, m.listTitle})
+	m.listTitle = clean(v.Title)
+	loc := m.locale()
+	cmd := m.startStream("Opening playlist... | Esc goes back", func(ctx context.Context, emit func(youtube.Event)) {
+		youtube.Browse(ctx, url, loc, emit)
+	})
+	return cmd
+}
+
+// closePlaylist goes back to the results the playlist was opened from.
+func (m *Model) closePlaylist() tea.Cmd {
+	if len(m.parents) == 0 {
+		return nil
+	}
+	if m.searchCancel != nil {
+		m.searchCancel()
+	}
+	m.generation++ // late events of the playlist are ignored
+	last := m.parents[len(m.parents)-1]
+	m.parents = m.parents[:len(m.parents)-1]
+	m.items, m.ranks, m.selected, m.top, m.listTitle = last.items, last.ranks, last.selected, last.top, last.title
+	m.searching, m.searchDone, m.metadataDone, m.searchError = false, true, true, ""
+	m.endVisual()
+	m.status = m.resultsStatus()
+	return m.scheduleThumbnail()
 }
 
 func waitSearchEvent(generation int, events <-chan youtube.Event) tea.Cmd {
@@ -518,12 +584,12 @@ func (m *Model) handleSearchEvent(event youtube.Event) []tea.Cmd {
 		} else if len(m.items) == 0 {
 			m.status = "No results | press / to search"
 		} else {
-			m.status = fmt.Sprintf("%d results | resolving live status...", len(m.items))
+			m.status = m.resultsStatus() + " | resolving details..."
 		}
 	case youtube.EventDetailsEnd:
 		m.metadataDone = true
 		if len(m.items) > 0 && len(m.playing) == 0 {
-			m.status = fmt.Sprintf("%d results", len(m.items))
+			m.status = m.resultsStatus()
 		}
 	}
 	return nil
@@ -715,7 +781,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		return nil
 	case "esc":
-		m.endVisual()
+		if m.visual {
+			m.endVisual()
+			m.status = "Ready"
+			return nil
+		}
+		if len(m.parents) > 0 {
+			return m.closePlaylist()
+		}
 		m.status = "Ready"
 		return nil
 	case "enter":
@@ -1153,6 +1226,9 @@ func (m *Model) playSelected() tea.Cmd {
 		m.status = "This result has no playable URL"
 		return nil
 	}
+	if v.IsPlaylist() {
+		return m.openPlaylist(v)
+	}
 	if _, exists := m.playing[v.ID]; exists {
 		m.status = "Already playing: " + v.Title
 		return nil
@@ -1229,7 +1305,7 @@ func (m *Model) downloadSelected() tea.Cmd {
 			return nil
 		}
 		if v.IsPlaylist() {
-			m.status = "Playlists cannot be downloaded yet"
+			m.status = "Open the playlist (Enter), then select videos with V to download them"
 			return nil
 		}
 		if v.IsCurrentlyLive() || v.IsUpcoming() {
@@ -1316,10 +1392,17 @@ func (m *Model) renderHeader() string {
 		searchLine += renderInput(m.searchInput, m.searchCursor, max(10, m.width-8))
 	case m.query == "":
 		searchLine += helpStyle.Render("press / to search videos, Shorts and live streams")
+	case m.listTitle != "":
+		room := max(10, m.width-8)
+		searchLine += truncate(m.query, room/3) + metaStyle.Render(" › ") +
+			playlistBadgeStyle.Render(playlistMark+" ") + truncate(m.listTitle, room*2/3-6)
 	default:
 		searchLine += truncate(m.query, max(10, m.width-8))
 	}
 	keys := "j/k move | h/l panes | Enter play | / search | f filters | ? help | q quit"
+	if len(m.parents) > 0 && !m.searchMode {
+		keys = "j/k move | Enter play | V select | Esc back to results | ? help | q quit"
+	}
 	if m.searchMode {
 		keys = "Enter search | Esc cancel | Up/Down past searches | arrows move | Ctrl+U clear"
 	}
