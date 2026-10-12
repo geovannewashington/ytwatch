@@ -26,6 +26,7 @@ const (
 	videoResultCount = 35
 	liveResultCount  = 20
 	playlistCount    = 10
+	shortResultCount = 8
 
 	// A filtered search is one query on the results page.
 	filteredResultCount   = 50
@@ -134,7 +135,7 @@ func Search(ctx context.Context, query string, filters Filters, emit func(Event)
 	if filters.Active() {
 		if filters.Type == TypeShorts {
 			queries = append(queries, func() queryResult {
-				return runShortsQuery(searchCtx, query, filters, &seen, &uniqueCount, regularJobs, emit)
+				return runShortsQuery(searchCtx, query, filters, 0, func(position int, _ string) int { return mainRanking.at(position) }, &seen, &uniqueCount, regularJobs, emit)
 			})
 		} else if filters.Type == TypePlaylists {
 			queries = append(queries, func() queryResult {
@@ -157,6 +158,11 @@ func Search(ctx context.Context, query string, filters Filters, emit func(Event)
 			},
 			func() queryResult {
 				return runPlaylistQuery(searchCtx, playlistSearchURL(query), playlistCount, playlistRanking, &seen, &uniqueCount, liveJobs, emit)
+			},
+			func() queryResult {
+				// yt-dlp's search never returns Shorts, so they come from the
+				// Shorts results page.
+				return runShortsQuery(searchCtx, query, Filters{Type: TypeShorts}, shortResultCount, shortRanking(query), &seen, &uniqueCount, regularJobs, emit)
 			},
 		)
 	}

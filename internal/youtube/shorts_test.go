@@ -1,6 +1,15 @@
 package youtube
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+)
 
 func TestParseShortsReadsTheShelfInPageOrder(t *testing.T) {
 	page := []byte(`<script>var ytInitialData = {"a":{"contents":[
@@ -29,5 +38,81 @@ func TestParseShortsReadsTheShelfInPageOrder(t *testing.T) {
 func TestParseShortsRejectsOtherPages(t *testing.T) {
 	if _, err := parseShorts([]byte("<html>consent</html>")); err == nil {
 		t.Fatal("want an error")
+	}
+}
+
+func init() {
+	// Tests never use the network. A test that needs a page sets its own.
+	fetchResultsPage = func(context.Context, string) ([]byte, error) {
+		return nil, errors.New("offline")
+	}
+}
+
+func TestShortRankingPutsMatchingTitlesFirst(t *testing.T) {
+	rank := shortRanking("Ranking funny cat")
+	// The exact title, ignoring case and punctuation, goes first of all.
+	if got := rank(7, "RANKING funny cat!"); got != -1 {
+		t.Errorf("an exact match has rank %d", got)
+	}
+	// Every query word is in the title: just after the regular result at the
+	// same position.
+	if got := rank(0, "Ranking Funny Cat Moment 😂"); got != mainRanking.at(0)+5 {
+		t.Errorf("a matching Short at position 0 has rank %d", got)
+	}
+	// Otherwise it joins the group after the first few results, in order.
+	a, b := rank(0, "Something else"), rank(1, "Another one")
+	if a != 55 || b <= a || a < mainRanking.at(5) {
+		t.Errorf("group ranks = %d, %d", a, b)
+	}
+	// An empty query matches nothing.
+	if got := shortRanking("")(0, "x"); got != 55 {
+		t.Errorf("empty query rank = %d", got)
+	}
+}
+
+func TestSearchAddsShortsToAMixedSearch(t *testing.T) {
+	old := fetchResultsPage
+	defer func() { fetchResultsPage = old }()
+	var asked string
+	fetchResultsPage = func(_ context.Context, u string) ([]byte, error) {
+		asked = u
+		var b strings.Builder
+		b.WriteString(`<script>var ytInitialData = {"x":[`)
+		for i := 0; i < 12; i++ {
+			title := "Other short"
+			if i == 3 {
+				title = "Ranking Funny Cat Moment"
+			}
+			if i > 0 {
+				b.WriteString(",")
+			}
+			fmt.Fprintf(&b, `{"shortsLockupViewModel":{"entityId":"shorts-shelf-item-short%06d","indexInCollection":%d,"overlayMetadata":{"primaryText":{"content":%q}}}}`, i, i, title)
+		}
+		b.WriteString(`]};</script>`)
+		return []byte(b.String()), nil
+	}
+	binDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(binDir, "yt-dlp"), []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	ranks := map[string]int{}
+	var mu sync.Mutex
+	Search(context.Background(), "ranking funny cat moment", Filters{}, func(e Event) {
+		if e.Kind == EventResult {
+			mu.Lock()
+			ranks[e.Video.Title+"/"+e.Video.ID] = e.Rank
+			mu.Unlock()
+		}
+	})
+	if !strings.Contains(asked, "sp=EgIQCQ") {
+		t.Fatalf("the Shorts page was not asked for: %q", asked)
+	}
+	if len(ranks) != shortResultCount {
+		t.Fatalf("got %d Shorts, want %d", len(ranks), shortResultCount)
+	}
+	if got := ranks["Ranking Funny Cat Moment/short000003"]; got != -1 {
+		t.Errorf("the matching Short has rank %d", got)
 	}
 }

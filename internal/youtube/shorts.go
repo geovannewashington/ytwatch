@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"github.com/geovannewashington/ytwatch/internal/media"
 )
@@ -123,20 +124,49 @@ func text(node map[string]any, path ...string) string {
 	return str(current)
 }
 
-// runShortsQuery fetches the Shorts of a results page and queues each one for
-// a detail lookup, which adds the length, channel and age.
-func runShortsQuery(
-	ctx context.Context,
-	query string,
-	f Filters,
-	seen *sync.Map,
-	uniqueCount *atomic.Int64,
-	jobs chan<- media.Video,
-	emit func(Event),
-) queryResult {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, shortsURL(query, f), nil)
+// shortRanking places Shorts in a mixed search. A Short with exactly the title
+// searched for goes first. A Short whose title has every
+// word of the query is as good a match as a regular result, so it goes right
+// after the regular result at the same position. The other Shorts form a group
+// after the first few results, like the Shorts shelf on youtube.com.
+func shortRanking(query string) func(position int, title string) int {
+	words := queryWords(query)
+	exact := strings.Join(words, " ")
+	return func(position int, title string) int {
+		if exact != "" && strings.Join(queryWords(title), " ") == exact {
+			return -1
+		}
+		if len(words) > 0 && containsAll(title, words) {
+			return mainRanking.at(position) + 5
+		}
+		return 55 + position*3
+	}
+}
+
+// queryWords splits text into lower-case words, ignoring punctuation.
+func queryWords(text string) []string {
+	return strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+}
+
+// containsAll reports whether title has every word.
+func containsAll(title string, words []string) bool {
+	lower := strings.Join(queryWords(title), " ")
+	for _, w := range words {
+		if !strings.Contains(lower, w) {
+			return false
+		}
+	}
+	return true
+}
+
+// fetchResultsPage downloads a results page. It is a variable so that tests do
+// not use the network.
+var fetchResultsPage = func(ctx context.Context, pageURL string) ([]byte, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL, nil)
 	if err != nil {
-		return queryResult{err: err}
+		return nil, err
 	}
 	request.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0")
 	request.Header.Set("Accept-Language", "en-US,en;q=0.9")
@@ -145,19 +175,39 @@ func runShortsQuery(
 	client := &http.Client{Timeout: 15 * time.Second}
 	response, err := client.Do(request)
 	if err != nil {
-		return queryResult{err: err}
+		return nil, err
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return queryResult{err: fmt.Errorf("youtube returned %s", response.Status)}
+		return nil, fmt.Errorf("youtube returned %s", response.Status)
 	}
-	page, err := io.ReadAll(io.LimitReader(response.Body, 16*1024*1024))
+	return io.ReadAll(io.LimitReader(response.Body, 16*1024*1024))
+}
+
+// runShortsQuery fetches the Shorts of a results page and queues each one for
+// a detail lookup, which adds the length, channel and age. limit caps how many
+// are used (0 means all), and rank gives each one its place in the list.
+func runShortsQuery(
+	ctx context.Context,
+	query string,
+	f Filters,
+	limit int,
+	rank func(position int, title string) int,
+	seen *sync.Map,
+	uniqueCount *atomic.Int64,
+	jobs chan<- media.Video,
+	emit func(Event),
+) queryResult {
+	page, err := fetchResultsPage(ctx, shortsURL(query, f))
 	if err != nil {
 		return queryResult{err: err}
 	}
 	shorts, err := parseShorts(page)
 	if err != nil {
 		return queryResult{err: err}
+	}
+	if limit > 0 && len(shorts) > limit {
+		shorts = shorts[:limit]
 	}
 	for position, short := range shorts {
 		if ctx.Err() != nil {
@@ -166,7 +216,7 @@ func runShortsQuery(
 		if _, duplicate := seen.LoadOrStore(short.ID, struct{}{}); duplicate {
 			continue
 		}
-		emit(Event{Kind: EventResult, Video: short, Count: int(uniqueCount.Add(1)), Rank: mainRanking.at(position)})
+		emit(Event{Kind: EventResult, Video: short, Count: int(uniqueCount.Add(1)), Rank: rank(position, short.Title)})
 		select {
 		case jobs <- short:
 		case <-ctx.Done():
