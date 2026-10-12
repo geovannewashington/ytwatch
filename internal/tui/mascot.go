@@ -2,7 +2,6 @@ package tui
 
 import (
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -49,13 +48,12 @@ func mascotRows(mood mascotMood, step int) []string {
 	}
 }
 
-// renderMascot draws Watchy centered in width columns, with the antennae
-// moving in time while he searches. The parts
+// renderMascot draws Watchy centered in width columns. step counts the ticks
+// of the screen's clock and moves the antennae while he searches. The parts
 // are colored by where they are, not by what the character is, because the
 // mouth can be the same character as the outline.
-func renderMascot(width int, mood mascotMood, now time.Time) []string {
-	step := int(now.UnixMilli() / 450)
-	rows := mascotRows(mood, step)
+func renderMascot(width int, mood mascotMood, step int) []string {
+	rows := mascotRows(mood, step/2)
 	out := make([]string, len(rows))
 	for i, row := range rows {
 		var b strings.Builder

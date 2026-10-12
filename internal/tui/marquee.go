@@ -98,6 +98,32 @@ func (m *Model) marqueeText(text string, width int) string {
 	return scrollWindow(text, width, offset)
 }
 
+// needsTick reports whether something on the screen moves with time: a
+// selected title that does not fit its space, or Watchy while he waits for
+// results. Without a tick the program redraws only when something happens, so
+// it uses no CPU when idle.
+func (m *Model) needsTick() bool {
+	if len(m.items) == 0 {
+		return m.searching
+	}
+	v, ok := m.selectedVideo()
+	if !ok {
+		return false
+	}
+	title := lipgloss.Width(clean(v.Title))
+	results, preview := m.paneWidths()
+	// A badge or the playlist mark takes some of the row, so allow for them.
+	if title > results-2-maxRowDecoration {
+		return true
+	}
+	return preview > 0 && title > preview
+}
+
+// maxRowDecoration is the most columns a badge and a playlist mark can take
+// from a result row. It errs on the large side, so a title is never left
+// unscrolled; the cost of a wrong guess is only a few extra redraws.
+const maxRowDecoration = 16
+
 // syncMarquee restarts the scroll when the selection changes, so a newly
 // selected long title always starts at its beginning.
 func (m *Model) syncMarquee() {

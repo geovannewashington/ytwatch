@@ -147,6 +147,7 @@ type Model struct {
 
 	marqueeID   string
 	marqueeStep int
+	ticking     bool // a marquee tick is waiting, see needsTick
 
 	themeName string
 
@@ -203,7 +204,7 @@ func (m *Model) SetConfig(cfg config.Config) {
 }
 
 func (m *Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{tickMarquee()}
+	var cmds []tea.Cmd
 	if m.query != "" {
 		cmds = append(cmds, m.beginSearch(m.query))
 	}
@@ -358,6 +359,10 @@ func waitSearchEvent(generation int, events <-chan youtube.Event) tea.Cmd {
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	model, cmd := m.update(msg)
 	m.syncMarquee()
+	if !m.ticking && m.needsTick() {
+		m.ticking = true
+		cmd = tea.Batch(cmd, tickMarquee())
+	}
 	return model, cmd
 }
 
@@ -365,7 +370,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case marqueeMsg:
 		m.marqueeStep++
-		return m, tickMarquee()
+		m.ticking = false // Update starts the next tick if it is still needed
+		return m, nil
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		if m.width < wideWidth {
@@ -1555,7 +1561,7 @@ func (m *Model) renderEmptyList(width, height int) []string {
 	for i := 0; i < (height-mascotHeight-3)/3; i++ {
 		lines = append(lines, "")
 	}
-	lines = append(lines, renderMascot(width, mood, time.Now())...)
+	lines = append(lines, renderMascot(width, mood, m.marqueeStep)...)
 	lines = append(lines, "", lipgloss.PlaceHorizontal(width, lipgloss.Center, caption))
 	return lines
 }
