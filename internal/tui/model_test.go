@@ -234,3 +234,69 @@ func TestPlaylistRowAndPreviewShowYouTubeStyleDetails(t *testing.T) {
 		}
 	}
 }
+
+func TestScrollWindow(t *testing.T) {
+	// "abcdef" + 3 spaces loops every 9 cells.
+	for offset, want := range map[int]string{0: "abcd", 2: "cdef", 5: "f   ", 7: "  ab", 9: "abcd"} {
+		if got := scrollWindow("abcdef", 4, offset); got != want {
+			t.Errorf("offset %d: got %q, want %q", offset, got, want)
+		}
+	}
+	// A wide character is never cut in half and the width stays exact.
+	for offset := 0; offset < 14; offset++ {
+		got := scrollWindow("日本語ab", 5, offset)
+		if w := lipgloss.Width(got); w != 5 {
+			t.Errorf("wide offset %d: %q is %d cells, want 5", offset, got, w)
+		}
+	}
+}
+
+func TestMarqueeOffsetRestsThenScrollsThenLoops(t *testing.T) {
+	loop := 10
+	if marqueeOffset(0, loop) != 0 || marqueeOffset(marqueePause, loop) != 0 {
+		t.Fatal("title should rest at the start first")
+	}
+	if got := marqueeOffset(marqueePause+3, loop); got != 3 {
+		t.Fatalf("offset = %d, want 3", got)
+	}
+	if got := marqueeOffset(marqueePause+loop, loop); got != 0 {
+		t.Fatalf("offset after one loop = %d, want 0", got)
+	}
+}
+
+func TestLongSelectedTitleScrollsAndShortOnesStay(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 120, 30
+	m.items = []media.Video{
+		{ID: "video0001", Title: "Short title", Duration: 60},
+		{ID: "video0002", Title: "A very long video title that cannot fit into the narrow results pane at all", Duration: 60},
+	}
+	m.selected = 1
+	m.syncMarquee()
+	const width = 40
+
+	rest := m.renderResultLines(width, 6)
+	if !strings.Contains(rest, "~") {
+		t.Fatalf("a resting long title shows a ~ cut:\n%s", rest)
+	}
+	m.marqueeStep = marqueePause + 12
+	moved := m.renderResultLines(width, 6)
+	if moved == rest || strings.Contains(strings.Split(moved, "\n")[2], "~") {
+		t.Fatalf("a long selected title should scroll:\nrest:\n%s\nmoved:\n%s", rest, moved)
+	}
+	for i, row := range strings.Split(moved, "\n") {
+		if w := lipgloss.Width(row); w > width {
+			t.Errorf("row %d is %d wide, want at most %d", i, w, width)
+		}
+	}
+	if !strings.Contains(moved, "Short title") {
+		t.Fatal("a short title must stay as it is")
+	}
+
+	// Moving the selection restarts the scroll.
+	m.handleKey(runeKey('k'))
+	m.syncMarquee()
+	if m.marqueeStep != 0 {
+		t.Fatalf("step = %d after the selection changed, want 0", m.marqueeStep)
+	}
+}

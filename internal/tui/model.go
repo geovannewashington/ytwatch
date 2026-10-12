@@ -120,6 +120,9 @@ type Model struct {
 	chatOpened   map[string]bool
 	spinnerFrame int
 	animating    bool
+
+	marqueeID   string
+	marqueeStep int
 }
 
 func New(initialQuery string) *Model {
@@ -153,10 +156,11 @@ func (m *Model) SetConfig(cfg config.Config) {
 }
 
 func (m *Model) Init() tea.Cmd {
+	cmds := []tea.Cmd{tickMarquee()}
 	if m.query != "" {
-		return m.beginSearch(m.query)
+		cmds = append(cmds, m.beginSearch(m.query))
 	}
-	return nil
+	return tea.Batch(cmds...)
 }
 
 func (m *Model) Close() {
@@ -235,7 +239,16 @@ func waitSearchEvent(generation int, events <-chan youtube.Event) tea.Cmd {
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	model, cmd := m.update(msg)
+	m.syncMarquee()
+	return model, cmd
+}
+
+func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case marqueeMsg:
+		m.marqueeStep++
+		return m, tickMarquee()
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		if m.width < wideWidth {
@@ -1040,7 +1053,13 @@ func (m *Model) renderResultLines(width, height int) string {
 			prefix = playlistBadgeStyle.Render(playlistMark + " ")
 			titleWidth -= 2
 		}
-		title := padToWidth(truncate(clean(v.Title), max(1, titleWidth)), titleWidth)
+		rowTitle := clean(v.Title)
+		if selected {
+			rowTitle = m.marqueeText(rowTitle, max(1, titleWidth))
+		} else {
+			rowTitle = truncate(rowTitle, max(1, titleWidth))
+		}
+		title := padToWidth(rowTitle, titleWidth)
 		line := marker + prefix + titleStyle.Render(title)
 		if badge != "" {
 			line += " " + badge
@@ -1163,7 +1182,7 @@ func (m *Model) renderPreview(width, height int) string {
 		lines = append(lines, "", subtitleStyle.Render("Select a result to inspect it."))
 	} else {
 		lines = append(lines, "")
-		lines = append(lines, lipgloss.NewStyle().Bold(true).Render(truncate(clean(v.Title), width)))
+		lines = append(lines, lipgloss.NewStyle().Bold(true).Render(m.marqueeText(clean(v.Title), width)))
 		lines = append(lines, metaStyle.Render(truncate(clean(v.ChannelName()), width)))
 
 		var stats []string
