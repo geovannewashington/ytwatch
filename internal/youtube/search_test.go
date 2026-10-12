@@ -44,7 +44,7 @@ esac
 	defer cancel()
 	var mu sync.Mutex
 	var events []Event
-	Search(ctx, "Go interfaces", func(event Event) {
+	Search(ctx, "Go interfaces", Filters{}, func(event Event) {
 		mu.Lock()
 		events = append(events, event)
 		mu.Unlock()

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -27,7 +26,11 @@ const (
 	videoResultCount = 35
 	liveResultCount  = 20
 	playlistCount    = 10
-	metadataWorkers  = 4
+
+	// A filtered search is one query on the results page.
+	filteredResultCount   = 50
+	filteredPlaylistCount = 30
+	metadataWorkers       = 4
 )
 
 type Event struct {
@@ -42,10 +45,12 @@ type queryResult struct {
 	err  error
 }
 
-// Search runs a normal relevance search alongside a live-oriented search.
-// Both stream flat results immediately; richer metadata is resolved by a
-// bounded worker pool so stream status and Shorts details can update later.
-func Search(ctx context.Context, query string, emit func(Event)) {
+// Search runs a normal relevance search alongside a live-oriented search and a
+// playlist search. With filters it runs one query on the results page instead,
+// because only that page supports them. All of them stream flat results
+// immediately; richer metadata is resolved by a bounded worker pool so stream
+// status and Shorts details can update later.
+func Search(ctx context.Context, query string, filters Filters, emit func(Event)) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		emit(Event{Kind: EventSearchDone, Err: errors.New("enter a search query")})
@@ -100,30 +105,53 @@ func Search(ctx context.Context, query string, emit func(Event)) {
 	var seen sync.Map
 	var uniqueCount atomic.Int64
 	var searchWG sync.WaitGroup
-	queryResults := make(chan queryResult, 3)
-
-	searchWG.Add(3)
-	go func() {
-		defer searchWG.Done()
-		queryResults <- runQuery(searchCtx, query, videoResultCount, false, &seen, &uniqueCount, regularJobs, liveJobs, emit)
-	}()
-	go func() {
-		defer searchWG.Done()
-		// Adding "live" broadens discovery of currently broadcasting channels.
-		// Full metadata still determines whether a result is actually live or a VOD.
-		queryResults <- runQuery(searchCtx, query+" live", liveResultCount, true, &seen, &uniqueCount, regularJobs, liveJobs, emit)
-	}()
-
-	go func() {
-		defer searchWG.Done()
-		queryResults <- runPlaylistQuery(searchCtx, query, playlistCount, &seen, &uniqueCount, liveJobs, emit)
-	}()
+	var queries []func() queryResult
+	if filters.Active() {
+		if filters.Type == TypeShorts {
+			queries = append(queries, func() queryResult {
+				return runShortsQuery(searchCtx, query, filters, &seen, &uniqueCount, regularJobs, emit)
+			})
+		} else if filters.Type == TypePlaylists {
+			queries = append(queries, func() queryResult {
+				return runPlaylistQuery(searchCtx, resultsURL(query, filters), filteredPlaylistCount, &seen, &uniqueCount, liveJobs, emit)
+			})
+		} else {
+			queries = append(queries, func() queryResult {
+				return runQuery(searchCtx, resultsURL(query, filters), filteredResultCount, filters.Type == TypeLive, &seen, &uniqueCount, regularJobs, liveJobs, emit)
+			})
+		}
+	} else {
+		queries = append(queries,
+			func() queryResult {
+				return runQuery(searchCtx, fmt.Sprintf("ytsearch%d:%s", videoResultCount, query), 0, false, &seen, &uniqueCount, regularJobs, liveJobs, emit)
+			},
+			func() queryResult {
+				// Adding "live" broadens discovery of currently broadcasting channels.
+				// Full metadata still determines whether a result is actually live or a VOD.
+				return runQuery(searchCtx, fmt.Sprintf("ytsearch%d:%s live", liveResultCount, query), 0, true, &seen, &uniqueCount, regularJobs, liveJobs, emit)
+			},
+			func() queryResult {
+				return runPlaylistQuery(searchCtx, playlistSearchURL(query), playlistCount, &seen, &uniqueCount, liveJobs, emit)
+			},
+		)
+	}
+	queryResults := make(chan queryResult, len(queries))
+	for _, run := range queries {
+		searchWG.Add(1)
+		go func() {
+			defer searchWG.Done()
+			queryResults <- run()
+		}()
+	}
 
 	searchWG.Wait()
 	close(regularJobs)
 	close(liveJobs)
 
-	results := []queryResult{<-queryResults, <-queryResults, <-queryResults}
+	results := make([]queryResult, len(queries))
+	for i := range results {
+		results[i] = <-queryResults
+	}
 	var searchErr error
 	if uniqueCount.Load() == 0 {
 		var messages []string
@@ -147,10 +175,13 @@ func Search(ctx context.Context, query string, emit func(Event)) {
 	emit(Event{Kind: EventDetailsEnd, Count: int(uniqueCount.Load())})
 }
 
+// runQuery runs one yt-dlp search and streams its results. source is a
+// "ytsearchN:query" spec or a results-page URL; listEnd limits how many
+// entries a URL returns (a ytsearch spec carries its own count, so it is 0).
 func runQuery(
 	ctx context.Context,
-	query string,
-	limit int,
+	source string,
+	listEnd int,
 	prioritizeLive bool,
 	seen *sync.Map,
 	uniqueCount *atomic.Int64,
@@ -158,14 +189,16 @@ func runQuery(
 	liveJobs chan<- media.Video,
 	emit func(Event),
 ) queryResult {
-	searchURL := fmt.Sprintf("ytsearch%d:%s", limit, query)
 	args := []string{
 		"--flat-playlist", "--dump-json", "--no-warnings", "--ignore-errors",
 		"--skip-download", "--socket-timeout", "7",
 		"--extractor-retries", "1", "--retries", "1",
 		"--extractor-args", "youtubetab:approximate_date",
-		searchURL,
 	}
+	if listEnd > 0 {
+		args = append(args, "--playlist-end", strconv.Itoa(listEnd))
+	}
+	args = append(args, source)
 	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -238,14 +271,14 @@ func runQuery(
 // playlistSearchURL is YouTube's results page filtered to playlists. The ytsearch
 // prefix cannot return playlists.
 func playlistSearchURL(query string) string {
-	return "https://www.youtube.com/results?search_query=" + url.QueryEscape(query) + "&sp=EgIQAw%253D%253D"
+	return resultsURL(query, Filters{Type: TypePlaylists})
 }
 
 // runPlaylistQuery emits playlist results and queues them for a detail lookup
 // on the priority queue, so their size and first videos show up early.
 func runPlaylistQuery(
 	ctx context.Context,
-	query string,
+	source string,
 	limit int,
 	seen *sync.Map,
 	uniqueCount *atomic.Int64,
@@ -257,7 +290,7 @@ func runPlaylistQuery(
 		"--skip-download", "--socket-timeout", "7",
 		"--extractor-retries", "1", "--retries", "1",
 		"--playlist-end", strconv.Itoa(limit),
-		playlistSearchURL(query))
+		source)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return queryResult{err: err}

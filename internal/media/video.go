@@ -192,13 +192,15 @@ func (v Video) DurationText() string {
 	if v.IsUpcoming() {
 		return "UPCOMING"
 	}
+	// Format the seconds ourselves: yt-dlp's duration_string is a bare "15"
+	// for a 15 second Short.
+	if v.Duration > 0 {
+		return FormatDuration(v.Duration)
+	}
 	if v.DurationString != "" {
 		return v.DurationString
 	}
-	if v.Duration <= 0 {
-		return "duration unknown"
-	}
-	return FormatDuration(v.Duration)
+	return "duration unknown"
 }
 
 // FormatDuration writes seconds as "m:ss" or "h:mm:ss".

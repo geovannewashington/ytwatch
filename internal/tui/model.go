@@ -86,6 +86,11 @@ type Model struct {
 	searchInput string
 	searchMode  bool
 	showHelp    bool
+
+	filters     youtube.Filters // applied to every search
+	showFilters bool
+	filterDraft youtube.Filters // edited in the menu, applied with Enter
+	filterRow   int
 	searching   bool
 	searchDone  bool
 	searchError string
@@ -214,6 +219,7 @@ func (m *Model) beginSearch(query string) tea.Cmd {
 	m.overlay.Remove()
 
 	ctx, cancel := context.WithCancel(m.ctx)
+	filters := m.filters
 	m.searchCancel = cancel
 	m.generation++
 	generation := m.generation
@@ -236,7 +242,7 @@ func (m *Model) beginSearch(query string) tea.Cmd {
 		events := make(chan youtube.Event, 256)
 		go func() {
 			defer close(events)
-			youtube.Search(ctx, query, func(event youtube.Event) {
+			youtube.Search(ctx, query, filters, func(event youtube.Event) {
 				select {
 				case events <- event:
 				case <-ctx.Done():
@@ -275,7 +281,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.keepSelectionVisible()
 		m.scrollPreview(0)
-		if m.width < wideWidth || m.height < minHeight || m.showHelp {
+		if m.width < wideWidth || m.height < minHeight || m.showHelp || m.showFilters {
 			m.overlay.Remove()
 		} else {
 			m.showSelectedThumbnail()
@@ -404,6 +410,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if m.showFilters {
+			return m, m.handleFilterKey(msg)
+		}
 		return m, m.handleKey(msg)
 	}
 	return m, nil
@@ -444,6 +453,8 @@ func (m *Model) handleSearchEvent(event youtube.Event) []tea.Cmd {
 		if event.Err != nil && len(m.items) == 0 {
 			m.searchError = clean(event.Err.Error())
 			m.status = "Search failed | / to retry"
+		} else if len(m.items) == 0 && m.filters.Active() {
+			m.status = "No results with these filters | press f to change them"
 		} else if len(m.items) == 0 {
 			m.status = "No results | press / to search"
 		} else {
@@ -552,6 +563,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	case "?":
 		m.showHelp = true
+		m.overlay.Remove()
+		return nil
+	case "f":
+		m.showFilters = true
+		m.filterDraft = m.filters
+		m.filterRow = 0
 		m.overlay.Remove()
 		return nil
 	case "esc":
@@ -1062,6 +1079,9 @@ func (m *Model) View() string {
 	if m.showHelp {
 		return m.renderHelp()
 	}
+	if m.showFilters {
+		return m.renderFilters()
+	}
 	return lipgloss.JoinVertical(lipgloss.Left, m.renderHeader(), m.renderBody(), m.renderFooter())
 }
 
@@ -1077,7 +1097,10 @@ func (m *Model) renderHeader() string {
 	} else {
 		searchLine += truncate(query, max(10, m.width-8))
 	}
-	keys := "j/k move | h/l panes | Enter play | / search | ? help | q quit"
+	if summary := m.filters.Summary(); summary != "" && !m.searchMode {
+		searchLine += keyStyle.Render("   filters: " + truncate(summary, max(10, m.width-lipgloss.Width(searchLine)-14)))
+	}
+	keys := "j/k move | h/l panes | Enter play | / search | f filters | ? help | q quit"
 	if m.searchMode {
 		keys = "Enter search | Esc cancel | Ctrl+U clear | Ctrl+W delete word"
 	}
@@ -1369,6 +1392,72 @@ func (m *Model) renderFooter() string {
 	return left + "  " + right
 }
 
+// handleFilterKey edits the filter draft. Enter applies it and searches again.
+func (m *Model) handleFilterKey(msg tea.KeyMsg) tea.Cmd {
+	rows := len(youtube.Rows)
+	switch msg.String() {
+	case "j", "down", "tab", "ctrl+n":
+		m.filterRow = (m.filterRow + 1) % rows
+	case "k", "up", "shift+tab", "ctrl+p":
+		m.filterRow = (m.filterRow + rows - 1) % rows
+	case "l", "right", " ":
+		m.filterDraft.Set(m.filterRow, m.filterDraft.Get(m.filterRow)+1)
+	case "h", "left":
+		m.filterDraft.Set(m.filterRow, m.filterDraft.Get(m.filterRow)-1)
+	case "x":
+		m.filterDraft = youtube.Filters{}
+	case "enter":
+		m.showFilters = false
+		m.filters = m.filterDraft
+		if m.query == "" {
+			m.status = "Filters set | press / to search"
+			return nil
+		}
+		return m.beginSearch(m.query)
+	case "esc", "q", "f":
+		m.showFilters = false
+		m.showSelectedThumbnail()
+	}
+	return nil
+}
+
+// filterHelpLines is the fixed height of the help text in the filter menu.
+const filterHelpLines = 2
+
+func (m *Model) renderFilters() string {
+	var b strings.Builder
+	b.WriteString(panelTitleStyle.Render("FILTERS") + "\n\n")
+	for row, def := range youtube.Rows {
+		cursor := "  "
+		if row == m.filterRow {
+			cursor = searchStyle.Render("> ")
+		}
+		b.WriteString(cursor + padToWidth(def.Name, 12))
+		for i, option := range def.Options {
+			if i == m.filterDraft.Get(row) {
+				b.WriteString(selectedTitleStyle.Render("[" + option + "]"))
+			} else {
+				b.WriteString(helpStyle.Render(" " + option + " "))
+			}
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+	// The help always takes the same number of lines, so the box does not
+	// change size while the cursor moves between rows.
+	help := wrapLines(youtube.Rows[m.filterRow].Help, 58, filterHelpLines)
+	for i := 0; i < filterHelpLines; i++ {
+		line := ""
+		if i < len(help) {
+			line = help[i]
+		}
+		b.WriteString(metaStyle.Render("  "+line) + "\n")
+	}
+	b.WriteString("\n" + helpStyle.Render("j/k row | h/l change | Enter search | x reset | Esc cancel"))
+	box := helpBoxStyle.Render(b.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+}
+
 func (m *Model) renderHelp() string {
 	rows := [][2]string{
 		{"j / k, ^ / v", "Move selection (or scroll preview)"},
@@ -1378,8 +1467,8 @@ func (m *Model) renderHelp() string {
 		{"H / M / L", "Top / middle / bottom of visible list"},
 		{"Ctrl+d/u, Ctrl+f/b", "Half-page / full-page down / up"},
 		{"h / l, Tab", "Focus results / preview (Tab toggles)"},
-		{"/", "Search (Enter runs, Esc cancels)"},
-		{"r", "Repeat current search"},
+		{"/ , r", "Search (Enter runs, Esc cancels) / repeat it"},
+		{"f", "Filters: type, duration, date, live, sort"},
 		{"Enter", "Play selected result in mpv"},
 		{"d / a", "Download selected / toggle audio-only"},
 		{"t", "Cycle the color theme"},
@@ -1392,6 +1481,7 @@ func (m *Model) renderHelp() string {
 		"Current livestreams open YouTube chat in your browser.",
 		"Shorts are marked [SHORT]; ordinary videos have no type label.",
 		"Playlists are marked PLAYLIST; Enter plays all their videos.",
+		"Filters stay on for every search until you reset them (x in the menu).",
 		"Description links are numbered [1], [2]...; a handler per kind: see config.",
 	}
 	// Try the roomiest layout first and drop notes, padding and the blank

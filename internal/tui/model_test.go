@@ -14,6 +14,7 @@ import (
 	"github.com/geovannewashington/ytwatch/internal/config"
 	"github.com/geovannewashington/ytwatch/internal/media"
 	"github.com/geovannewashington/ytwatch/internal/theme"
+	"github.com/geovannewashington/ytwatch/internal/youtube"
 )
 
 func runeKey(r rune) tea.KeyMsg {
@@ -397,5 +398,128 @@ func TestLinkNumberOutOfRangeAndNoLinks(t *testing.T) {
 	}
 	if len(*calls) != 0 {
 		t.Fatalf("nothing should have been opened: %q", *calls)
+	}
+}
+
+func TestFilterMenuAppliesOnEnterAndCancelsOnEsc(t *testing.T) {
+	m := New("go tutorial")
+	m.items = sampleVideos()
+	m.width, m.height = 120, 30
+
+	m.handleKey(runeKey('f'))
+	if !m.showFilters {
+		t.Fatal("f should open the filter menu")
+	}
+	// Row 0 is Type; move to Duration (j) and pick the third option (l, l).
+	m.handleFilterKey(runeKey('j'))
+	m.handleFilterKey(runeKey('l'))
+	m.handleFilterKey(runeKey('l'))
+	if m.filters.Active() {
+		t.Fatal("changes must not apply before Enter")
+	}
+	if m.filterDraft.Duration != 2 {
+		t.Fatalf("draft duration = %d, want 2", m.filterDraft.Duration)
+	}
+
+	// Esc discards the draft.
+	m.handleFilterKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.showFilters || m.filters.Active() {
+		t.Fatal("Esc should close the menu without applying")
+	}
+
+	// Enter applies the draft and starts a search with it.
+	m.handleKey(runeKey('f'))
+	m.handleFilterKey(runeKey('j'))
+	m.handleFilterKey(runeKey('j'))
+	m.handleFilterKey(runeKey('l')) // Upload date: Today
+	cmd := m.handleFilterKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil || m.showFilters || m.filters.Date != 1 {
+		t.Fatalf("Enter should apply and search: cmd=%v shown=%v filters=%+v", cmd != nil, m.showFilters, m.filters)
+	}
+	if !m.searching || m.query != "go tutorial" {
+		t.Fatalf("a new search should be running for the same query: searching=%v query=%q", m.searching, m.query)
+	}
+	m.cancel()
+
+	// x resets the draft.
+	m.handleKey(runeKey('f'))
+	m.handleFilterKey(runeKey('x'))
+	if m.filterDraft.Active() {
+		t.Fatal("x should reset the draft")
+	}
+}
+
+func TestFiltersShowInTheHeaderAndKeepAfterNewSearch(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 120, 30
+	m.filters = youtube.Filters{Type: youtube.TypeLive, Date: 2}
+	if header := m.renderHeader(); !strings.Contains(header, "filters: Live, This week") {
+		t.Fatalf("header should list the filters:\n%s", header)
+	}
+	m.query = "x"
+	m.beginSearch("another query")
+	if m.filters != (youtube.Filters{Type: youtube.TypeLive, Date: 2}) {
+		t.Fatal("a new search must keep the filters")
+	}
+	m.cancel()
+}
+
+func TestFilterMenuFitsTheTerminal(t *testing.T) {
+	for _, size := range [][2]int{{80, 18}, {100, 30}, {150, 40}} {
+		m := New("test")
+		m.width, m.height = size[0], size[1]
+		m.showFilters = true
+		m.filterDraft = youtube.Filters{Type: youtube.TypePlaylists, Duration: 3, Date: 4}
+		out := m.View()
+		lines := strings.Split(out, "\n")
+		if len(lines) != size[1] {
+			t.Errorf("%v: menu is %d lines tall, want %d", size, len(lines), size[1])
+		}
+		for i, line := range lines {
+			if w := lipgloss.Width(line); w > size[0] {
+				t.Errorf("%v: line %d is %d wide", size, i, w)
+			}
+		}
+		for _, want := range []string{"FILTERS", "[Playlists]", "[Over 20 minutes]", "[This year]", "What to search for", "Esc cancel"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%v: menu is missing %q", size, want)
+			}
+		}
+	}
+}
+
+func TestFilterMenuExplainsTheFocusedRow(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 100, 30
+	m.showFilters = true
+	m.filterRow = youtube.RowType
+	out := m.View()
+	for _, want := range []string{"streams happening now"} {
+		if !strings.Contains(strings.Join(strings.Fields(out), " "), strings.Join(strings.Fields(want), " ")) {
+			t.Errorf("the Live help is missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestFilterMenuKeepsItsSizeOnEveryRow(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 100, 30
+	m.showFilters = true
+	var height, width int
+	for row := range youtube.Rows {
+		m.filterRow = row
+		out := m.View()
+		h := strings.Count(out, "┌") + strings.Count(out, "│")
+		w := 0
+		for _, line := range strings.Split(out, "\n") {
+			if i := strings.Index(line, "┌"); i >= 0 {
+				w = lipgloss.Width(line[i:])
+			}
+		}
+		if row == 0 {
+			height, width = h, w
+		} else if h != height || w != width {
+			t.Errorf("row %d: box is %dx%d, row 0 is %dx%d", row, w, h, width, height)
+		}
 	}
 }

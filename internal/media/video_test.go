@@ -142,3 +142,20 @@ func TestThumbnailCandidatesForPlaylistsAndUnknownIDs(t *testing.T) {
 		t.Fatalf("no id and no list should give none, got %v", got)
 	}
 }
+
+func TestDurationTextFormatsShortsAsMinutesAndSeconds(t *testing.T) {
+	cases := []struct {
+		video Video
+		want  string
+	}{
+		{Video{Duration: 15, DurationString: "15"}, "0:15"},
+		{Video{Duration: 4073, DurationString: "1:07:53"}, "1:07:53"},
+		{Video{Duration: 0, DurationString: "12:34"}, "12:34"},
+		{Video{}, "duration unknown"},
+	}
+	for _, tc := range cases {
+		if got := tc.video.DurationText(); got != tc.want {
+			t.Errorf("DurationText(%+v) = %q, want %q", tc.video, got, tc.want)
+		}
+	}
+}
