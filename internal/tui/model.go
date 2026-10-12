@@ -18,6 +18,7 @@ import (
 	"github.com/geovannewashington/ytwatch/internal/media"
 	"github.com/geovannewashington/ytwatch/internal/player"
 	"github.com/geovannewashington/ytwatch/internal/preview"
+	"github.com/geovannewashington/ytwatch/internal/theme"
 	"github.com/geovannewashington/ytwatch/internal/youtube"
 )
 
@@ -123,12 +124,15 @@ type Model struct {
 
 	marqueeID   string
 	marqueeStep int
+
+	themeName string
 }
 
 func New(initialQuery string) *Model {
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &Model{
 		ctx: ctx, cancel: cancel,
+		themeName:      theme.Default,
 		query:          strings.TrimSpace(initialQuery),
 		status:         "Ready",
 		thumbnailPaths: make(map[string]string),
@@ -153,6 +157,12 @@ func New(initialQuery string) *Model {
 func (m *Model) SetConfig(cfg config.Config) {
 	m.cfg = cfg
 	m.audioOnly = cfg.General.AudioOnly
+	// The config parser already checked the theme, so this only fails for a
+	// config built in code; the built-in theme stays then.
+	if t, err := theme.Resolve(cfg.Theme.Name, cfg.Theme.Colors); err == nil {
+		ApplyTheme(t)
+		m.themeName = t.Name
+	}
 }
 
 func (m *Model) Init() tea.Cmd {
@@ -646,6 +656,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return m.scheduleThumbnail()
 	case "r":
 		return m.beginSearch(m.query)
+	case "t":
+		next := theme.Next(m.themeName)
+		ApplyTheme(next)
+		m.themeName = next.Name
+		m.status = "Theme: " + next.Name + " | this session only, set [theme] name in config.toml to keep it"
+		return nil
 	case "a":
 		m.audioOnly = !m.audioOnly
 		if m.audioOnly {
@@ -1281,8 +1297,8 @@ func (m *Model) renderHelp() string {
 		{"/", "Search (Enter runs, Esc cancels)"},
 		{"r", "Repeat current search"},
 		{"Enter", "Play selected result in mpv"},
-		{"d", "Download selected result"},
-		{"a", "Toggle audio-only (play and download)"},
+		{"d / a", "Download selected / toggle audio-only"},
+		{"t", "Cycle the color theme"},
 		{"y", "Copy URL with wl-copy"},
 		{"? / Esc", "Close this help"},
 		{"q", "Quit"},

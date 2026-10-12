@@ -70,3 +70,35 @@ args = ["--embed-metadata"]
 		t.Fatalf("unexpected defaults: %+v", def)
 	}
 }
+
+func TestParseTheme(t *testing.T) {
+	cfg, err := Parse(`
+[theme]
+name = "Nord"
+accent = "#112233"   # a single colour
+live = 9
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Theme.Name != "nord" || cfg.Theme.Colors["accent"] != "#112233" || cfg.Theme.Colors["live"] != "9" {
+		t.Fatalf("unexpected theme: %+v", cfg.Theme)
+	}
+	if def, _ := Parse(""); def.Theme.Name != "" || len(def.Theme.Colors) != 0 {
+		t.Fatalf("default theme should be empty (the built-in default): %+v", def.Theme)
+	}
+}
+
+func TestParseThemeErrors(t *testing.T) {
+	for _, text := range []string{
+		"[theme]\nname = \"nope\"",
+		"[theme]\naccent = \"green\"",
+		"[theme]\naccent = \"#12345\"",
+		"[theme]\nbogus = \"#112233\"",
+		"[theme]\nname = nord",
+	} {
+		if _, err := Parse(text); err == nil {
+			t.Errorf("expected error for %q", text)
+		}
+	}
+}

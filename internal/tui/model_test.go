@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -8,7 +9,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/geovannewashington/ytwatch/internal/config"
 	"github.com/geovannewashington/ytwatch/internal/media"
+	"github.com/geovannewashington/ytwatch/internal/theme"
 )
 
 func runeKey(r rune) tea.KeyMsg {
@@ -298,5 +301,30 @@ func TestLongSelectedTitleScrollsAndShortOnesStay(t *testing.T) {
 	m.syncMarquee()
 	if m.marqueeStep != 0 {
 		t.Fatalf("step = %d after the selection changed, want 0", m.marqueeStep)
+	}
+}
+
+func TestThemeConfigAndCycling(t *testing.T) {
+	t.Cleanup(func() {
+		def, _ := theme.Lookup(theme.Default)
+		ApplyTheme(def)
+	})
+	m := New("test")
+	if m.themeName != theme.Default {
+		t.Fatalf("default theme = %q", m.themeName)
+	}
+
+	cfg := config.Default()
+	cfg.Theme = config.Theme{Name: "nord", Colors: map[string]string{"accent": "#112233"}}
+	m.SetConfig(cfg)
+	if m.themeName != "nord" {
+		t.Fatalf("configured theme = %q, want nord", m.themeName)
+	}
+
+	m.handleKey(runeKey('t'))
+	names := theme.Names()
+	want := names[(slices.Index(names, "nord")+1)%len(names)]
+	if m.themeName != want || !strings.Contains(m.status, want) {
+		t.Fatalf("after t: theme %q status %q, want %q", m.themeName, m.status, want)
 	}
 }

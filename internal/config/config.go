@@ -10,8 +10,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/geovannewashington/ytwatch/internal/theme"
 )
 
 type Config struct {
@@ -19,6 +22,14 @@ type Config struct {
 	MPV      MPV
 	Chat     Chat
 	Download Download
+	Theme    Theme
+}
+
+// Theme selects the colours. Name is a preset (see package theme) and Colors
+// overrides single roles on top of it, for example accent = "#88c0d0".
+type Theme struct {
+	Name   string
+	Colors map[string]string
 }
 
 type General struct {
@@ -128,6 +139,9 @@ func Parse(text string) (Config, error) {
 }
 
 func (c *Config) set(section, key, raw string) error {
+	if section == "theme" {
+		return c.setTheme(key, raw)
+	}
 	var err error
 	switch section + "." + key {
 	case "general.audio_only":
@@ -154,6 +168,31 @@ func (c *Config) set(section, key, raw string) error {
 	if err != nil {
 		return fmt.Errorf("invalid value for %s: %w", key, err)
 	}
+	return nil
+}
+
+func (c *Config) setTheme(key, raw string) error {
+	value, err := parseString(raw)
+	if err != nil {
+		return fmt.Errorf("invalid value for %s: %w", key, err)
+	}
+	if key == "name" {
+		if _, ok := theme.Lookup(value); !ok {
+			return theme.UnknownThemeError(value)
+		}
+		c.Theme.Name = strings.ToLower(strings.TrimSpace(value))
+		return nil
+	}
+	if !slices.Contains(theme.Roles, key) {
+		return fmt.Errorf("unknown setting %q in section [theme] (name, or a colour: %s)", key, strings.Join(theme.Roles, ", "))
+	}
+	if !theme.ValidColor(value) {
+		return theme.InvalidColorError(value)
+	}
+	if c.Theme.Colors == nil {
+		c.Theme.Colors = make(map[string]string)
+	}
+	c.Theme.Colors[key] = value
 	return nil
 }
 

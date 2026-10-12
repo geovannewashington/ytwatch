@@ -4,45 +4,81 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/geovannewashington/ytwatch/internal/theme"
 )
 
-// Low-contrast green palette in the spirit of Everforest. Body text uses the
+// The styles are set by ApplyTheme, which runs for the default theme at start
+// and again when the configured or cycled theme changes. Body text uses the
 // terminal's own foreground; only accents and the selected title are coloured.
 var (
-	green      = lipgloss.Color("#a7c080")
-	aqua       = lipgloss.Color("#83c092")
-	yellow     = lipgloss.Color("#dbbc7f")
-	orange     = lipgloss.Color("#e69875")
-	red        = lipgloss.Color("#e67e80")
-	grey       = lipgloss.Color("#859289")
-	greyLight  = lipgloss.Color("#9da9a0")
-	borderGrey = lipgloss.Color("#4f5b58")
-
-	titleStyle         = lipgloss.NewStyle().Bold(true).Foreground(green)
-	taglineStyle       = lipgloss.NewStyle().Foreground(grey)
-	subtitleStyle      = lipgloss.NewStyle().Foreground(grey)
-	searchStyle        = lipgloss.NewStyle().Foreground(aqua).Bold(true)
-	helpStyle          = lipgloss.NewStyle().Foreground(grey)
-	statusStyle        = lipgloss.NewStyle().Foreground(greyLight)
-	errorStyle         = lipgloss.NewStyle().Foreground(red).Bold(true)
-	panelTitleStyle    = lipgloss.NewStyle().Foreground(green).Bold(true)
-	selectedTitleStyle = lipgloss.NewStyle().Foreground(green).Bold(true)
-	selectedMetaStyle  = lipgloss.NewStyle().Foreground(greyLight)
-	normalTitleStyle   = lipgloss.NewStyle()
-	metaStyle          = lipgloss.NewStyle().Foreground(grey)
-	descriptionStyle   = lipgloss.NewStyle()
-	liveBadgeStyle     = lipgloss.NewStyle().Foreground(red).Bold(true)
-	shortBadgeStyle    = lipgloss.NewStyle().Foreground(yellow).Bold(true)
-	upcomingBadgeStyle = lipgloss.NewStyle().Foreground(aqua).Bold(true)
-	pastLiveBadgeStyle = lipgloss.NewStyle().Foreground(orange).Bold(true)
-	playlistBadgeStyle = lipgloss.NewStyle().Foreground(green).Bold(true)
-	playingStyle       = lipgloss.NewStyle().Foreground(green).Bold(true)
-	panelStyle         = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(borderGrey).Padding(0, 1)
-	activePanelStyle   = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(green).Padding(0, 1)
-	footerStyle        = lipgloss.NewStyle().Foreground(grey)
-	helpBoxStyle       = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(green).Padding(1, 2)
-	keyStyle           = lipgloss.NewStyle().Foreground(aqua)
+	titleStyle         lipgloss.Style
+	taglineStyle       lipgloss.Style
+	subtitleStyle      lipgloss.Style
+	searchStyle        lipgloss.Style
+	helpStyle          lipgloss.Style
+	statusStyle        lipgloss.Style
+	errorStyle         lipgloss.Style
+	panelTitleStyle    lipgloss.Style
+	selectedTitleStyle lipgloss.Style
+	selectedMetaStyle  lipgloss.Style
+	normalTitleStyle   lipgloss.Style
+	metaStyle          lipgloss.Style
+	descriptionStyle   lipgloss.Style
+	liveBadgeStyle     lipgloss.Style
+	shortBadgeStyle    lipgloss.Style
+	upcomingBadgeStyle lipgloss.Style
+	pastLiveBadgeStyle lipgloss.Style
+	playlistBadgeStyle lipgloss.Style
+	playingStyle       lipgloss.Style
+	panelStyle         lipgloss.Style
+	activePanelStyle   lipgloss.Style
+	footerStyle        lipgloss.Style
+	helpBoxStyle       lipgloss.Style
+	keyStyle           lipgloss.Style
 )
+
+func init() {
+	def, _ := theme.Lookup(theme.Default)
+	ApplyTheme(def)
+}
+
+// ApplyTheme rebuilds every style from the theme's colours.
+func ApplyTheme(t theme.Theme) {
+	color := func(role string) lipgloss.Color { return lipgloss.Color(t.Color(role)) }
+	accent, secondary := color("accent"), color("secondary")
+	muted, subtle := color("muted"), color("subtle")
+	bold := func(c lipgloss.Color) lipgloss.Style { return lipgloss.NewStyle().Foreground(c).Bold(true) }
+	plain := func(c lipgloss.Color) lipgloss.Style { return lipgloss.NewStyle().Foreground(c) }
+	box := func(border lipgloss.Color) lipgloss.Style {
+		return lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(border)
+	}
+
+	titleStyle = bold(accent)
+	taglineStyle = plain(muted)
+	subtitleStyle = plain(muted)
+	searchStyle = bold(secondary)
+	helpStyle = plain(muted)
+	statusStyle = plain(subtle)
+	errorStyle = bold(color("error"))
+	panelTitleStyle = bold(accent)
+	selectedTitleStyle = bold(accent)
+	selectedMetaStyle = plain(subtle)
+	normalTitleStyle = lipgloss.NewStyle()
+	metaStyle = plain(muted)
+	descriptionStyle = lipgloss.NewStyle()
+	liveBadgeStyle = bold(color("live"))
+	shortBadgeStyle = bold(color("short"))
+	upcomingBadgeStyle = bold(secondary)
+	pastLiveBadgeStyle = bold(color("vod"))
+	playlistBadgeStyle = bold(accent)
+	playingStyle = bold(accent)
+	panelStyle = box(color("border")).Padding(0, 1)
+	activePanelStyle = box(accent).Padding(0, 1)
+	footerStyle = plain(muted)
+	helpBoxStyle = box(accent).Padding(1, 2)
+	keyStyle = plain(secondary)
+}
 
 // eqFrames is one bar of the playing equalizer over time.
 var eqFrames = []string{"▁", "▃", "▅", "▇", "▅", "▃"}
