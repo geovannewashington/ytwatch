@@ -64,10 +64,18 @@ func NormalizeRegion(value string) (string, error) {
 // YtDlpArgs returns the yt-dlp options for the locale. The language goes to
 // YouTube's extractor. The region is sent as a fake X-Forwarded-For address
 // from that country, which is how yt-dlp does it; YouTube may ignore it.
-func (l Locale) YtDlpArgs() []string {
-	var args []string
+// youtubeArgs are other YouTube extractor arguments, such as "player_skip=js".
+// They are merged into one option with the language, because yt-dlp keeps
+// only one --extractor-args for each extractor.
+func (l Locale) YtDlpArgs(youtubeArgs ...string) []string {
+	var parts []string
 	if l.Language != "" {
-		args = append(args, "--extractor-args", "youtube:lang="+l.Language)
+		parts = append(parts, "lang="+l.Language)
+	}
+	parts = append(parts, youtubeArgs...)
+	var args []string
+	if len(parts) > 0 {
+		args = append(args, "--extractor-args", "youtube:"+strings.Join(parts, ";"))
 	}
 	if l.Region != "" {
 		args = append(args, "--xff", l.Region)

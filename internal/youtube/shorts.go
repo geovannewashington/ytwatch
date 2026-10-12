@@ -1,6 +1,7 @@
 package youtube
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -39,12 +40,12 @@ func shortsURL(query string, f Filters, loc locale.Locale) string {
 
 // parseShorts returns the Shorts listed on a results page, in page order.
 func parseShorts(page []byte) ([]media.Video, error) {
-	start := strings.Index(string(page), initialDataMarker)
+	start := bytes.Index(page, []byte(initialDataMarker))
 	if start < 0 {
 		return nil, errors.New("unexpected results page")
 	}
 	var data any
-	decoder := json.NewDecoder(strings.NewReader(string(page[start+len(initialDataMarker):])))
+	decoder := json.NewDecoder(bytes.NewReader(page[start+len(initialDataMarker):]))
 	if err := decoder.Decode(&data); err != nil {
 		return nil, fmt.Errorf("read results page: %w", err)
 	}

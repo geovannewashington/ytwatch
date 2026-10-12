@@ -436,7 +436,14 @@ func FetchDetails(parent context.Context, base media.Video, loc locale.Locale) (
 			"--socket-timeout", "6", "--extractor-retries", "1", "--retries", "1", url,
 		}
 	}
-	args = append(loc.YtDlpArgs(), args...)
+	// Only metadata is wanted, not streams, so the player scripts are skipped.
+	// The fields used are the same without them, and each lookup takes about
+	// half the time and CPU. A playlist lookup does not use the player.
+	var youtubeArgs []string
+	if !base.IsPlaylist() {
+		youtubeArgs = []string{"player_skip=js,configs", "player_client=web"}
+	}
+	args = append(loc.YtDlpArgs(youtubeArgs...), args...)
 	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

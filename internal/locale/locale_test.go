@@ -29,6 +29,14 @@ func TestNormalize(t *testing.T) {
 }
 
 func TestArgsAndParams(t *testing.T) {
+	// Extra YouTube arguments are merged with the language into one option.
+	merged := Locale{Language: "ja", Region: "JP"}.YtDlpArgs("player_skip=js", "player_client=web")
+	if want := []string{"--extractor-args", "youtube:lang=ja;player_skip=js;player_client=web", "--xff", "JP"}; !reflect.DeepEqual(merged, want) {
+		t.Fatalf("merged = %v", merged)
+	}
+	if got := (Locale{}).YtDlpArgs("player_skip=js"); !reflect.DeepEqual(got, []string{"--extractor-args", "youtube:player_skip=js"}) {
+		t.Fatalf("without a locale: %v", got)
+	}
 	if got := (Locale{}).YtDlpArgs(); len(got) != 0 {
 		t.Fatalf("no locale means no arguments: %v", got)
 	}
