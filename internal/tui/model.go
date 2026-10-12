@@ -61,7 +61,7 @@ type thumbnailLoadedMsg struct {
 }
 
 type playerExitedMsg struct {
-	id  string
+	ids []string // everything that was in this mpv: one video, or a queue
 	err error
 }
 
@@ -98,6 +98,8 @@ type Model struct {
 	showFilters  bool
 	quality      string // see package quality
 	showQuality  bool
+	visual       bool // a line selection is active (V)
+	visualAnchor int  // where the selection started
 	qualityDraft int
 	filterDraft  youtube.Filters // edited in the menu, applied with Enter
 	filterCol    int
@@ -243,6 +245,7 @@ func (m *Model) beginSearch(query string) tea.Cmd {
 	m.query = query
 	m.setInput(query)
 	m.searchMode = false
+	m.endVisual()
 	if m.history != nil {
 		m.history.Add(query, time.Now())
 	}
@@ -383,7 +386,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case playerExitedMsg:
-		delete(m.playing, msg.id)
+		for _, id := range msg.ids {
+			delete(m.playing, id)
+		}
 		if len(m.playing) == 0 {
 			m.status = "Playback ended"
 		} else {
@@ -670,7 +675,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.qualityDraft = max(slices.Index(quality.Levels, m.quality), 0)
 		m.overlay.Remove()
 		return nil
+	case "V", "shift+v":
+		if m.visual {
+			m.endVisual()
+			m.status = "Ready"
+		} else {
+			m.startVisual()
+		}
+		return nil
 	case "esc":
+		m.endVisual()
 		m.status = "Ready"
 		return nil
 	case "enter":
@@ -1093,7 +1107,12 @@ func (m *Model) previewGeometry() (leftOuterWidth, rightInnerWidth, thumbRows, y
 	return
 }
 
+// playSelected plays the current result in mpv, or all of a visual selection
+// as one queue.
 func (m *Model) playSelected() tea.Cmd {
+	if m.visual {
+		return m.playQueue()
+	}
 	v, ok := m.selectedVideo()
 	if !ok {
 		m.status = "No result selected"
@@ -1107,22 +1126,61 @@ func (m *Model) playSelected() tea.Cmd {
 		m.status = "Already playing: " + v.Title
 		return nil
 	}
-	cmd, err := player.Start(v, m.cfg, player.Options{AudioOnly: m.audioOnly, Quality: m.quality})
+	return m.startPlayer([]media.Video{v})
+}
+
+// playQueue plays the visual selection in one mpv, which steps through it
+// like a playlist (< and > in mpv).
+func (m *Model) playQueue() tea.Cmd {
+	videos, skip := m.selectedVideos(false)
+	m.endVisual()
+	var fresh []media.Video
+	for _, v := range videos {
+		if _, exists := m.playing[v.ID]; !exists {
+			fresh = append(fresh, v)
+		}
+	}
+	if len(fresh) == 0 {
+		m.status = "Nothing to play in the selection"
+		if text := skip.text(); text != "" {
+			m.status += " | " + text
+		}
+		return nil
+	}
+	cmd := m.startPlayer(fresh)
+	if text := skip.text(); text != "" && cmd != nil {
+		m.status += " | " + text
+	}
+	return cmd
+}
+
+// startPlayer opens videos in one mpv. A single live stream also opens its chat.
+func (m *Model) startPlayer(videos []media.Video) tea.Cmd {
+	cmd, err := player.Start(videos, m.cfg, player.Options{AudioOnly: m.audioOnly, Quality: m.quality})
 	if err != nil {
 		m.status = err.Error()
 		return nil
 	}
-	m.playing[v.ID] = v.Title
-	m.status = "▶ Playing | " + clean(v.Title)
-	if v.IsCurrentlyLive() {
-		if err := player.OpenYouTubeChat(v, m.cfg); err == nil {
-			m.chatOpened[v.ID] = true
-			m.status = "Live stream | opened chat"
-		} else {
-			m.status = "Live stream | " + err.Error()
+	ids := make([]string, len(videos))
+	for i, v := range videos {
+		ids[i] = v.ID
+		m.playing[v.ID] = v.Title
+	}
+	if len(videos) > 1 {
+		m.status = fmt.Sprintf("▶ Playing a queue of %d | < and > in mpv skip", len(videos))
+	} else {
+		v := videos[0]
+		m.status = "▶ Playing | " + clean(v.Title)
+		if v.IsCurrentlyLive() {
+			if err := player.OpenYouTubeChat(v, m.cfg); err == nil {
+				m.chatOpened[v.ID] = true
+				m.status = "Live stream | opened chat"
+			} else {
+				m.status = "Live stream | " + err.Error()
+			}
 		}
 	}
-	cmds := []tea.Cmd{waitForPlayer(cmd, v.ID)}
+	cmds := []tea.Cmd{waitForPlayer(cmd, ids)}
 	if !m.animating {
 		m.animating = true
 		cmds = append(cmds, tickAnimation())
@@ -1130,37 +1188,68 @@ func (m *Model) playSelected() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// downloadSelected downloads the current result, or all of a visual selection
+// one after the other.
 func (m *Model) downloadSelected() tea.Cmd {
-	v, ok := m.selectedVideo()
-	if !ok {
-		m.status = "No result selected"
-		return nil
+	if !m.visual {
+		v, ok := m.selectedVideo()
+		if !ok {
+			m.status = "No result selected"
+			return nil
+		}
+		if v.IsPlaylist() {
+			m.status = "Playlists cannot be downloaded yet"
+			return nil
+		}
+		if v.IsCurrentlyLive() || v.IsUpcoming() {
+			m.status = "Live and upcoming streams cannot be downloaded"
+			return nil
+		}
+		return m.startDownloads([]media.Video{v})
 	}
-	if _, exists := m.downloading[v.ID]; exists {
-		m.status = "Already downloading: " + clean(v.Title)
-		return nil
+	videos, skip := m.selectedVideos(true)
+	m.endVisual()
+	cmd := m.startDownloads(videos)
+	if cmd == nil {
+		m.status = "Nothing to download in the selection"
 	}
-	if v.IsPlaylist() {
-		m.status = "Playlists cannot be downloaded yet"
-		return nil
+	if text := skip.text(); text != "" {
+		m.status += " | " + text
 	}
-	if v.IsCurrentlyLive() || v.IsUpcoming() {
-		m.status = "Live and upcoming streams cannot be downloaded"
-		return nil
-	}
-	m.downloading[v.ID] = v.Title
-	m.status = "⬇ Downloading | " + clean(v.Title)
-	ctx, cfg := m.ctx, m.cfg
-	opts := download.Options{AudioOnly: m.audioOnly, Quality: m.quality}
-	return func() tea.Msg {
-		path, err := download.Run(ctx, v, cfg, opts)
-		return downloadDoneMsg{id: v.ID, title: v.Title, path: path, err: err}
-	}
+	return cmd
 }
 
-func waitForPlayer(cmd *player.Process, id string) tea.Cmd {
+// startDownloads downloads videos one after the other, so a long selection
+// does not open many connections at once.
+func (m *Model) startDownloads(videos []media.Video) tea.Cmd {
+	var cmds []tea.Cmd
+	ctx, cfg := m.ctx, m.cfg
+	opts := download.Options{AudioOnly: m.audioOnly, Quality: m.quality}
+	for _, v := range videos {
+		if _, exists := m.downloading[v.ID]; exists {
+			m.status = "Already downloading: " + clean(v.Title)
+			continue
+		}
+		m.downloading[v.ID] = v.Title
+		cmds = append(cmds, func() tea.Msg {
+			path, err := download.Run(ctx, v, cfg, opts)
+			return downloadDoneMsg{id: v.ID, title: v.Title, path: path, err: err}
+		})
+	}
+	switch len(cmds) {
+	case 0:
+		return nil
+	case 1:
+		m.status = "⬇ Downloading | " + clean(videos[len(videos)-1].Title)
+	default:
+		m.status = fmt.Sprintf("⬇ Downloading %d videos, one after the other", len(cmds))
+	}
+	return tea.Sequence(cmds...)
+}
+
+func waitForPlayer(cmd *player.Process, ids []string) tea.Cmd {
 	return func() tea.Msg {
-		return playerExitedMsg{id: id, err: cmd.Wait()}
+		return playerExitedMsg{ids: ids, err: cmd.Wait()}
 	}
 }
 
@@ -1262,6 +1351,12 @@ func (m *Model) renderResultLines(width, height int) string {
 		titleStyle := normalTitleStyle
 		if selected {
 			titleStyle = selectedTitleStyle
+		}
+		if m.inSelection(i) {
+			titleStyle = selectedTitleStyle
+			if !selected {
+				cursor = "┃ "
+			}
 		}
 		marker := titleStyle.Render(cursor)
 		if _, isPlaying := m.playing[v.ID]; isPlaying {
@@ -1472,6 +1567,9 @@ func (m *Model) renderFooter() string {
 		prefix = equalizer(m.spinnerFrame, 3) + " "
 		status = "Playing " + strconv.Itoa(len(m.playing)) + " video(s)"
 	}
+	if m.visual {
+		status = m.visualStatus()
+	}
 	style := statusStyle
 	if m.searchError != "" && len(m.items) == 0 {
 		status = m.searchError
@@ -1628,7 +1726,7 @@ func (m *Model) renderHelp() string {
 		{"/ , r", "Edit search (Up/Down: past ones) / repeat it"},
 		{"f", "Filters: type, duration, upload date"},
 		{"t", "Cycle the color theme"},
-		{"Enter", "Play selected result in mpv"},
+		{"V, Enter", "Select lines (j/k) / play in mpv, as a queue"},
 		{"d / a / Q", "Download / audio-only / video quality"},
 		{"o / y", "Open / copy URL (3o, 3y: description link 3)"},
 		{"? / Esc", "Close this help"},

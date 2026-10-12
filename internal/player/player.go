@@ -112,17 +112,27 @@ type Options struct {
 	Quality string
 }
 
-// Start opens v in mpv.
-func Start(v media.Video, cfg config.Config, opts Options) (*Process, error) {
-	url := v.CanonicalURL()
-	if url == "" {
-		return nil, fmt.Errorf("could not determine a playable URL")
+// Start opens videos in one mpv. Several videos make a queue that mpv steps
+// through like a playlist.
+func Start(videos []media.Video, cfg config.Config, opts Options) (*Process, error) {
+	if len(videos) == 0 {
+		return nil, fmt.Errorf("nothing to play")
+	}
+	urls := make([]string, len(videos))
+	for i, v := range videos {
+		if urls[i] = v.CanonicalURL(); urls[i] == "" {
+			return nil, fmt.Errorf("could not determine a playable URL")
+		}
 	}
 	path, err := exec.LookPath("mpv")
 	if err != nil {
 		return nil, fmt.Errorf("mpv is not installed")
 	}
-	title := strings.ReplaceAll(v.Title, "\n", " ")
+	title := strings.ReplaceAll(videos[0].Title, "\n", " ")
+	if len(videos) > 1 {
+		// mpv shows the title of whichever video is playing.
+		title = "${media-title}"
+	}
 	// --quiet drops the status line, so the output file only holds messages.
 	// web_safari avoids HTTP 403 errors some videos give with the default
 	// clients.
@@ -143,7 +153,7 @@ func Start(v media.Video, cfg config.Config, opts Options) (*Process, error) {
 		args = append(args, "--ytdl-raw-options-append=cookies-from-browser="+cfg.MPV.CookiesFromBrowser)
 	}
 	args = append(args, cfg.MPV.Args...)
-	cmd := exec.Command(path, append(args, "--", url)...)
+	cmd := exec.Command(path, append(args, append([]string{"--"}, urls...)...)...)
 	cmd.Stdin = nil
 	// mpv writes its output to an unlinked temp file. A pipe would close when
 	// ytwatch exits and kill mpv on its next write; a file lets playback
