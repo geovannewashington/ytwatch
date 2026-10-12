@@ -82,3 +82,22 @@ func TestLoadDoesNotShortenTheFileWhenReadingStopsEarly(t *testing.T) {
 		t.Fatal("the file was rewritten, which would delete the lines that were not read")
 	}
 }
+
+func TestLeadingSlashesOfOldEntriesAreRemoved(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "history")
+	line := func(age time.Duration, q string) string {
+		return strconv.FormatInt(now.Add(-age).Unix(), 10) + "\t" + q + "\n"
+	}
+	data := line(3*time.Hour, "/the primetime") + line(2*time.Hour, "go") + line(time.Hour, "the primetime")
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := Load(path, 30*24*time.Hour, 100, now)
+	if got, want := s.Queries(), []string{"go", "the primetime"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Queries() = %q, want %q", got, want)
+	}
+	s.Add("/rust", now)
+	if got := s.Queries(); got[len(got)-1] != "rust" {
+		t.Fatalf("Add should drop the slash: %q", got)
+	}
+}

@@ -919,3 +919,25 @@ func TestFilterMenuExplainsThatShortsIgnoreTheDate(t *testing.T) {
 		t.Fatal("the note belongs only to Shorts")
 	}
 }
+
+func TestALeadingSlashIsNotPartOfTheSearch(t *testing.T) {
+	// ytwatch starts with the search open. Typing / there by habit is ignored.
+	m := New("")
+	m.handleSearchInput(keyOf("/"))
+	if m.searchInput != "" {
+		t.Fatalf("input = %q, the first / should be ignored", m.searchInput)
+	}
+	for _, r := range "the primetime" {
+		m.handleSearchInput(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	m.handleSearchInput(keyOf("/")) // a / in the middle of a query stays
+	if m.searchInput != "the primetime/" {
+		t.Fatalf("input = %q", m.searchInput)
+	}
+	// A query that still has one (from an old history, or pasted) loses it.
+	m.beginSearch("//the primetime, nobody is readin anything")
+	m.cancel()
+	if m.query != "the primetime, nobody is readin anything" {
+		t.Fatalf("query = %q", m.query)
+	}
+}

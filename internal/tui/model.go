@@ -225,7 +225,9 @@ func (m *Model) Close() {
 }
 
 func (m *Model) beginSearch(query string) tea.Cmd {
-	query = strings.TrimSpace(query)
+	// A leading / is the key that opens the search, typed again by habit. It
+	// would change what YouTube finds, so it is not part of the query.
+	query = strings.TrimSpace(strings.TrimLeft(query, "/"))
 	if query == "" {
 		m.searchMode = true
 		m.setInput(m.query)
@@ -712,6 +714,9 @@ func (m *Model) handleSearchInput(msg tea.KeyMsg) tea.Cmd {
 		edit(cursor, cursor, " ")
 	default:
 		if msg.Type == tea.KeyRunes {
+			if len(runes) == 0 && string(msg.Runes) == "/" {
+				break // the search is already open, so this / is a habit
+			}
 			edit(cursor, cursor, string(msg.Runes))
 		}
 	}

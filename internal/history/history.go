@@ -61,6 +61,8 @@ func Load(path string, maxAge time.Duration, maxEntries int, now time.Time) *Sto
 	for scanner.Scan() {
 		total++
 		seconds, query, ok := strings.Cut(scanner.Text(), "\t")
+		// Older versions stored the / that opens the search as part of the query.
+		query = strings.TrimSpace(strings.TrimLeft(query, "/"))
 		unix, err := strconv.ParseInt(seconds, 10, 64)
 		if !ok || err != nil || strings.TrimSpace(query) == "" {
 			continue
@@ -84,7 +86,7 @@ func Load(path string, maxAge time.Duration, maxEntries int, now time.Time) *Sto
 // Add records query as the newest search. An earlier copy of the same query
 // is removed, so every query appears once.
 func (s *Store) Add(query string, now time.Time) {
-	query = strings.Join(strings.Fields(query), " ")
+	query = strings.Join(strings.Fields(strings.TrimLeft(query, "/")), " ")
 	if query == "" || s.path == "" {
 		return
 	}
