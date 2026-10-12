@@ -175,3 +175,19 @@ func TestParsePreviewOutput(t *testing.T) {
 		t.Fatal("unknown output should fail")
 	}
 }
+
+func TestParseHistory(t *testing.T) {
+	if d := Default().History; !d.Enabled || d.MaxAgeDays != 30 || d.MaxEntries != 100 {
+		t.Fatalf("defaults: %+v", d)
+	}
+	cfg, err := Parse("[history]\nenabled = false\nmax_age_days = 7\nmax_entries = 20\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h := cfg.History; h.Enabled || h.MaxAgeDays != 7 || h.MaxEntries != 20 {
+		t.Fatalf("history: %+v", h)
+	}
+	if _, err := Parse("[history]\nmax_entries = 0\n"); err == nil {
+		t.Fatal("0 entries should be rejected")
+	}
+}

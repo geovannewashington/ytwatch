@@ -16,6 +16,7 @@ import (
 	"github.com/geovannewashington/ytwatch/internal/clipboard"
 	"github.com/geovannewashington/ytwatch/internal/config"
 	"github.com/geovannewashington/ytwatch/internal/download"
+	"github.com/geovannewashington/ytwatch/internal/history"
 	"github.com/geovannewashington/ytwatch/internal/links"
 	"github.com/geovannewashington/ytwatch/internal/media"
 	"github.com/geovannewashington/ytwatch/internal/player"
@@ -86,6 +87,9 @@ type Model struct {
 	searchInput  string
 	searchCursor int  // position in searchInput, in runes
 	searchMode   bool // the search line at the top is active
+	history      *history.Store
+	historyPos   int    // index in the history while browsing it with Up/Down
+	historyDraft string // what was typed before browsing
 	showHelp     bool
 
 	filters     youtube.Filters // applied to every search
@@ -158,6 +162,7 @@ func New(initialQuery string) *Model {
 		overlay:        &preview.Overlay{},
 		cfg:            config.Default(),
 		width:          100, height: 30,
+		historyPos: -1,
 	}
 	if m.query == "" {
 		m.searchMode = true
@@ -172,6 +177,11 @@ func (m *Model) SetConfig(cfg config.Config) {
 	m.cfg = cfg
 	m.audioOnly = cfg.General.AudioOnly
 	m.overlay.Configure(cfg.Preview.Output)
+	m.history = nil
+	if cfg.History.Enabled {
+		maxAge := time.Duration(cfg.History.MaxAgeDays) * 24 * time.Hour
+		m.history = history.Load(history.Path(), maxAge, cfg.History.MaxEntries, time.Now())
+	}
 	// The config parser already checked the theme, so this only fails for a
 	// config built in code; the built-in theme stays then.
 	if t, err := theme.Resolve(cfg.Theme.Name, cfg.Theme.Colors); err == nil {
@@ -227,6 +237,9 @@ func (m *Model) beginSearch(query string) tea.Cmd {
 	m.query = query
 	m.setInput(query)
 	m.searchMode = false
+	if m.history != nil {
+		m.history.Add(query, time.Now())
+	}
 	m.searching = true
 	m.searchDone = false
 	m.metadataDone = false
@@ -470,6 +483,32 @@ func (m *Model) handleSearchEvent(event youtube.Event) []tea.Cmd {
 	return nil
 }
 
+// browseHistory moves through the past searches in the search line: -1 goes to
+// an older one, +1 to a newer one, and past the newest it brings back what was
+// being typed. Editing the text ends the browsing.
+func (m *Model) browseHistory(step int) {
+	if m.history == nil {
+		return
+	}
+	queries := m.history.Queries()
+	if m.historyPos < 0 || m.historyPos > len(queries) {
+		m.historyPos = len(queries)
+	}
+	if m.historyPos == len(queries) {
+		m.historyDraft = m.searchInput
+	}
+	pos := min(max(m.historyPos+step, 0), len(queries))
+	if pos == m.historyPos {
+		return
+	}
+	m.historyPos = pos
+	if pos == len(queries) {
+		m.setInput(m.historyDraft)
+	} else {
+		m.setInput(queries[pos])
+	}
+}
+
 // setInput replaces the text of the search line and puts the cursor at its end.
 func (m *Model) setInput(text string) {
 	m.searchInput = text
@@ -486,6 +525,9 @@ func (m *Model) handleSearchInput(msg tea.KeyMsg) tea.Cmd {
 		m.searchInput = string(out)
 		m.searchCursor = from + len([]rune(insert))
 	}
+	if key := msg.String(); key != "up" && key != "down" && key != "ctrl+p" && key != "ctrl+n" {
+		m.historyPos = -1 // any other key ends the browsing
+	}
 	if msg.Paste {
 		edit(cursor, cursor, strings.Join(strings.Fields(string(msg.Runes)), " "))
 		return nil
@@ -501,6 +543,12 @@ func (m *Model) handleSearchInput(msg tea.KeyMsg) tea.Cmd {
 	case "esc":
 		m.searchMode = false
 		m.status = "Search cancelled"
+	case "up", "ctrl+p":
+		m.browseHistory(-1)
+		return nil
+	case "down", "ctrl+n":
+		m.browseHistory(+1)
+		return nil
 	case "left", "ctrl+b":
 		m.searchCursor = max(cursor-1, 0)
 	case "right", "ctrl+f":
@@ -597,7 +645,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		// The current query is there to edit; Ctrl+U clears it.
 		m.searchMode = true
 		m.setInput(m.query)
-		m.status = "Edit the search | Enter runs | Esc cancels | Ctrl+U clears"
+		m.historyPos = -1
+		m.status = "Edit the search | Up/Down past searches | Enter runs | Esc cancels"
 		return nil
 	case "?":
 		m.showHelp = true
@@ -1133,7 +1182,7 @@ func (m *Model) renderHeader() string {
 	}
 	keys := "j/k move | h/l panes | Enter play | / search | f filters | ? help | q quit"
 	if m.searchMode {
-		keys = "Enter search | Esc cancel | arrows move | Ctrl+U clear | Ctrl+W delete word"
+		keys = "Enter search | Esc cancel | Up/Down past searches | arrows move | Ctrl+U clear"
 	}
 	center := func(s string) string {
 		return lipgloss.PlaceHorizontal(m.width, lipgloss.Center, s)
@@ -1512,7 +1561,7 @@ func (m *Model) renderHelp() string {
 		{"H / M / L", "Top / middle / bottom of visible list"},
 		{"Ctrl+d/u, Ctrl+f/b", "Half-page / full-page down / up"},
 		{"h / l, Tab", "Focus results / preview (Tab toggles)"},
-		{"/ , r", "Edit the search (Enter runs) / repeat it"},
+		{"/ , r", "Edit search (Up/Down: past ones) / repeat it"},
 		{"f", "Filters: type, duration, upload date"},
 		{"t", "Cycle the color theme"},
 		{"Enter", "Play selected result in mpv"},

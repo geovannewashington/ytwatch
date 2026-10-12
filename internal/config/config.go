@@ -25,6 +25,7 @@ type Config struct {
 	Download Download
 	Theme    Theme
 	Preview  Preview
+	History  History
 	// Links are the programs that open description links, tried in the order
 	// they appear in the file. See LinkHandler.
 	Links []LinkHandler
@@ -59,6 +60,15 @@ type Preview struct {
 	// terminal inside a Wayland session. kitty, sixel, iterm2 and chafa draw
 	// inside the terminal and also work over SSH.
 	Output string
+}
+
+// History configures the list of past searches, which Up and Down walk through
+// in the search line. It is a small text file; entries older than MaxAgeDays
+// and entries beyond MaxEntries are deleted every time ytwatch starts.
+type History struct {
+	Enabled    bool
+	MaxAgeDays int
+	MaxEntries int
 }
 
 // Theme selects the colours. Name is a preset (see package theme) and Colors
@@ -116,6 +126,7 @@ func Default() Config {
 	return Config{
 		Chat:     Chat{Enabled: true},
 		Download: Download{Dir: "~/Downloads/ytwatch"},
+		History:  History{Enabled: true, MaxAgeDays: 30, MaxEntries: 100},
 	}
 }
 
@@ -214,6 +225,12 @@ func (c *Config) set(section, key, raw string) error {
 		c.MPV.CookiesFromBrowser, err = parseString(raw)
 	case "mpv.args":
 		c.MPV.Args, err = parseStringArray(raw)
+	case "history.enabled":
+		c.History.Enabled, err = strconv.ParseBool(raw)
+	case "history.max_age_days":
+		c.History.MaxAgeDays, err = parsePositiveInt(raw)
+	case "history.max_entries":
+		c.History.MaxEntries, err = parsePositiveInt(raw)
 	case "chat.enabled":
 		c.Chat.Enabled, err = strconv.ParseBool(raw)
 	case "chat.workspace":
@@ -362,4 +379,13 @@ func stripComment(line string) string {
 		}
 	}
 	return line
+}
+
+// parsePositiveInt parses a whole number of at least 1.
+func parsePositiveInt(raw string) (int, error) {
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("%q is not a whole number of 1 or more", raw)
+	}
+	return n, nil
 }

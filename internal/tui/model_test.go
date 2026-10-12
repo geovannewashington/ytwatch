@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"slices"
@@ -12,6 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/geovannewashington/ytwatch/internal/config"
+	"github.com/geovannewashington/ytwatch/internal/history"
 	"github.com/geovannewashington/ytwatch/internal/media"
 	"github.com/geovannewashington/ytwatch/internal/theme"
 	"github.com/geovannewashington/ytwatch/internal/youtube"
@@ -557,5 +561,52 @@ func TestSearchInputEditsAtTheCursor(t *testing.T) {
 	}
 	if line := m.renderHeader(); !strings.Contains(line, "langétutorial") {
 		t.Fatalf("header should show the input:\n%s", line)
+	}
+}
+
+func TestUpAndDownWalkThroughTheSearchHistory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "history")
+	now := time.Now()
+	data := fmt.Sprintf("%d\talpha\n%d\tbeta\n%d\tgamma\n", now.Add(-3*time.Hour).Unix(), now.Add(-2*time.Hour).Unix(), now.Add(-time.Hour).Unix())
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := New("current")
+	m.history = history.Load(path, 24*time.Hour, 10, now)
+	up, down := tea.KeyMsg{Type: tea.KeyUp}, tea.KeyMsg{Type: tea.KeyDown}
+
+	m.handleKey(runeKey('/'))
+	m.handleSearchInput(keyOf("!")) // typed text is kept as a draft
+	for _, want := range []string{"gamma", "beta", "alpha", "alpha"} {
+		m.handleSearchInput(up)
+		if m.searchInput != want {
+			t.Fatalf("Up gave %q, want %q", m.searchInput, want)
+		}
+	}
+	for _, want := range []string{"beta", "gamma", "current!", "current!"} {
+		m.handleSearchInput(down)
+		if m.searchInput != want {
+			t.Fatalf("Down gave %q, want %q", m.searchInput, want)
+		}
+	}
+	// A recalled search can be edited before it runs.
+	m.handleSearchInput(up)
+	m.handleSearchInput(keyOf("2"))
+	if m.searchInput != "gamma2" {
+		t.Fatalf("input = %q", m.searchInput)
+	}
+	m.handleSearchInput(keyOf("enter"))
+	m.cancel()
+	if got := m.history.Queries(); got[len(got)-1] != "gamma2" {
+		t.Fatalf("the new search should be saved: %q", got)
+	}
+}
+
+func TestNoHistoryMeansUpAndDownDoNothing(t *testing.T) {
+	m := New("current")
+	m.handleKey(runeKey('/'))
+	m.handleSearchInput(tea.KeyMsg{Type: tea.KeyUp})
+	if m.searchInput != "current" {
+		t.Fatalf("input = %q", m.searchInput)
 	}
 }
