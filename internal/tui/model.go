@@ -1307,7 +1307,7 @@ func (m *Model) View() string {
 }
 
 func (m *Model) renderHeader() string {
-	brand := titleStyle.Render("ytwatch") + taglineStyle.Render("  -  search YouTube, play in mpv")
+	brand := titleStyle.Render("YTWATCH") + searchStyle.Render(" ✦ ") + taglineStyle.Render("Search YouTube from your terminal and play in mpv")
 	searchLine := searchStyle.Render("> ")
 	switch {
 	case m.searchMode:
