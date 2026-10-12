@@ -29,7 +29,7 @@ Dependencies:
   Optional: ueberzugpp (thumbnails), a web browser (live chat), wl-clipboard (copy URL),
     wmctrl (workspace placement on X11)
 
-Config: ~/.config/ytwatch/config.toml (mpv/chat workspaces, mpv args)
+Config: ~/.config/ytwatch/config.toml (workspaces, mpv args, download folder)
 
 Inside ytwatch, press ? for keyboard help.`
 

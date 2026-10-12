@@ -99,7 +99,9 @@ func shorten(line string) string {
 	return line
 }
 
-func Start(v media.Video, cfg config.Config) (*Process, error) {
+// Start opens v in mpv. With audioOnly, mpv skips the video stream; the window
+// stays so playback can still be controlled.
+func Start(v media.Video, cfg config.Config, audioOnly bool) (*Process, error) {
 	url := v.CanonicalURL()
 	if url == "" {
 		return nil, fmt.Errorf("could not determine a playable URL")
@@ -115,6 +117,9 @@ func Start(v media.Video, cfg config.Config) (*Process, error) {
 	args := []string{
 		"--force-window=yes", "--quiet", "--title=" + mpvTitlePrefix + title,
 		"--ytdl-raw-options-append=extractor-args=youtube:player_client=default,web_safari",
+	}
+	if audioOnly {
+		args = append(args, "--no-video", "--ytdl-format=bestaudio/best")
 	}
 	// Forcing the Wayland context would break mpv on X11 sessions.
 	if os.Getenv("WAYLAND_DISPLAY") != "" {

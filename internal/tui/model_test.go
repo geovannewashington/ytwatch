@@ -124,3 +124,32 @@ func TestResultRowsKeepTheirWidthWithBadgesAndPlayback(t *testing.T) {
 		}
 	}
 }
+
+func TestAudioOnlyToggle(t *testing.T) {
+	m := New("test")
+	m.items = sampleVideos()
+	m.handleKey(runeKey('a'))
+	if !m.audioOnly {
+		t.Fatal("a should turn audio-only on")
+	}
+	m.handleKey(runeKey('a'))
+	if m.audioOnly {
+		t.Fatal("a should turn audio-only off")
+	}
+}
+
+func TestDownloadRefusesLiveAndDuplicates(t *testing.T) {
+	m := New("test")
+	m.items = []media.Video{{ID: "video0001", Title: "Live", IsLive: true}, {ID: "video0002", Title: "VOD"}}
+
+	if cmd := m.handleKey(runeKey('d')); cmd != nil || len(m.downloading) != 0 {
+		t.Fatal("live stream must not start a download")
+	}
+	m.selected = 1
+	if cmd := m.handleKey(runeKey('d')); cmd == nil || len(m.downloading) != 1 {
+		t.Fatal("regular video should start a download")
+	}
+	if cmd := m.handleKey(runeKey('d')); cmd != nil {
+		t.Fatal("same video must not download twice at once")
+	}
+}

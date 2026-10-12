@@ -49,3 +49,24 @@ func TestParseCookiesFromBrowser(t *testing.T) {
 		t.Fatalf("cfg=%+v err=%v", cfg, err)
 	}
 }
+
+func TestParseDownloadAndGeneral(t *testing.T) {
+	cfg, err := Parse(`
+[general]
+audio_only = true
+
+[download]
+dir = "~/Music/ytwatch"
+args = ["--embed-metadata"]
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.General.AudioOnly || cfg.Download.Dir != "~/Music/ytwatch" ||
+		!reflect.DeepEqual(cfg.Download.Args, []string{"--embed-metadata"}) {
+		t.Fatalf("unexpected config: %+v", cfg)
+	}
+	if def, _ := Parse(""); def.Download.Dir != "~/Downloads/ytwatch" || def.General.AudioOnly {
+		t.Fatalf("unexpected defaults: %+v", def)
+	}
+}

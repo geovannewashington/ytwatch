@@ -15,8 +15,24 @@ import (
 )
 
 type Config struct {
-	MPV  MPV
-	Chat Chat
+	General  General
+	MPV      MPV
+	Chat     Chat
+	Download Download
+}
+
+type General struct {
+	// AudioOnly starts ytwatch in audio-only mode. It applies to playback and
+	// downloads, and can be toggled with "a".
+	AudioOnly bool
+}
+
+type Download struct {
+	// Dir is where downloads are saved. A leading ~ is the home directory.
+	Dir string
+	// Args are extra command-line arguments passed to yt-dlp. They come last,
+	// so they can override the defaults, for example ["-f", "bv*[height<=720]+ba"].
+	Args []string
 }
 
 type MPV struct {
@@ -46,7 +62,10 @@ type Chat struct {
 }
 
 func Default() Config {
-	return Config{Chat: Chat{Enabled: true}}
+	return Config{
+		Chat:     Chat{Enabled: true},
+		Download: Download{Dir: "~/Downloads/ytwatch"},
+	}
 }
 
 // Path returns the location of the config file.
@@ -111,6 +130,12 @@ func Parse(text string) (Config, error) {
 func (c *Config) set(section, key, raw string) error {
 	var err error
 	switch section + "." + key {
+	case "general.audio_only":
+		c.General.AudioOnly, err = strconv.ParseBool(raw)
+	case "download.dir":
+		c.Download.Dir, err = parseString(raw)
+	case "download.args":
+		c.Download.Args, err = parseStringArray(raw)
 	case "mpv.workspace":
 		c.MPV.Workspace, err = parseString(raw)
 	case "mpv.cookies_from_browser":

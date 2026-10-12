@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/geovannewashington/ytwatch/internal/config"
+	"github.com/geovannewashington/ytwatch/internal/download"
 	"github.com/geovannewashington/ytwatch/internal/media"
 	"github.com/geovannewashington/ytwatch/internal/player"
 	"github.com/geovannewashington/ytwatch/internal/preview"
@@ -55,6 +57,13 @@ type thumbnailLoadedMsg struct {
 type playerExitedMsg struct {
 	id  string
 	err error
+}
+
+type downloadDoneMsg struct {
+	id    string
+	title string
+	path  string
+	err   error
 }
 
 type animationMsg struct{}
@@ -106,6 +115,8 @@ type Model struct {
 	cfg config.Config
 
 	playing      map[string]string
+	downloading  map[string]string
+	audioOnly    bool
 	chatOpened   map[string]bool
 	spinnerFrame int
 	animating    bool
@@ -121,6 +132,7 @@ func New(initialQuery string) *Model {
 		thumbFailures:  make(map[string]time.Time),
 		thumbAttempts:  make(map[string]int),
 		playing:        make(map[string]string),
+		downloading:    make(map[string]string),
 		chatOpened:     make(map[string]bool),
 		overlay:        &preview.Overlay{},
 		cfg:            config.Default(),
@@ -135,7 +147,10 @@ func New(initialQuery string) *Model {
 }
 
 // SetConfig applies the user configuration; call it before running the program.
-func (m *Model) SetConfig(cfg config.Config) { m.cfg = cfg }
+func (m *Model) SetConfig(cfg config.Config) {
+	m.cfg = cfg
+	m.audioOnly = cfg.General.AudioOnly
+}
 
 func (m *Model) Init() tea.Cmd {
 	if m.query != "" {
@@ -320,6 +335,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = msg.err.Error()
 		}
 		// The running animation tick keeps itself alive; do not start another.
+		return m, nil
+
+	case downloadDoneMsg:
+		delete(m.downloading, msg.id)
+		switch {
+		case errors.Is(msg.err, context.Canceled):
+			// ytwatch is quitting; yt-dlp resumes the partial file next time.
+		case msg.err != nil:
+			m.status = "Download failed | " + clean(msg.err.Error())
+		default:
+			m.status = "✔ Saved | " + msg.path
+		}
 		return m, nil
 
 	case animationMsg:
@@ -606,6 +633,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return m.scheduleThumbnail()
 	case "r":
 		return m.beginSearch(m.query)
+	case "a":
+		m.audioOnly = !m.audioOnly
+		if m.audioOnly {
+			m.status = "Audio-only mode on | applies to playing and downloading"
+		} else {
+			m.status = "Audio-only mode off"
+		}
+		return nil
+	case "d":
+		return m.downloadSelected()
 	case "y":
 		v, ok := m.selectedVideo()
 		if !ok {
@@ -843,7 +880,7 @@ func (m *Model) playSelected() tea.Cmd {
 		m.status = "Already playing: " + v.Title
 		return nil
 	}
-	cmd, err := player.Start(v, m.cfg)
+	cmd, err := player.Start(v, m.cfg, m.audioOnly)
 	if err != nil {
 		m.status = err.Error()
 		return nil
@@ -864,6 +901,29 @@ func (m *Model) playSelected() tea.Cmd {
 		cmds = append(cmds, tickAnimation())
 	}
 	return tea.Batch(cmds...)
+}
+
+func (m *Model) downloadSelected() tea.Cmd {
+	v, ok := m.selectedVideo()
+	if !ok {
+		m.status = "No result selected"
+		return nil
+	}
+	if _, exists := m.downloading[v.ID]; exists {
+		m.status = "Already downloading: " + clean(v.Title)
+		return nil
+	}
+	if v.IsCurrentlyLive() || v.IsUpcoming() {
+		m.status = "Live and upcoming streams cannot be downloaded"
+		return nil
+	}
+	m.downloading[v.ID] = v.Title
+	m.status = "⬇ Downloading | " + clean(v.Title)
+	ctx, cfg, audioOnly := m.ctx, m.cfg, m.audioOnly
+	return func() tea.Msg {
+		path, err := download.Run(ctx, v, cfg, audioOnly)
+		return downloadDoneMsg{id: v.ID, title: v.Title, path: path, err: err}
+	}
 }
 
 func waitForPlayer(cmd *player.Process, id string) tea.Cmd {
@@ -1125,7 +1185,14 @@ func (m *Model) renderFooter() string {
 		style = errorStyle
 		prefix = ""
 	}
-	right := footerStyle.Render(fmt.Sprintf("%d/%d", min(m.selected+1, len(m.items)), len(m.items)))
+	tags := ""
+	if m.audioOnly {
+		tags += "♪ audio  "
+	}
+	if len(m.downloading) > 0 {
+		tags += fmt.Sprintf("⬇ %d  ", len(m.downloading))
+	}
+	right := footerStyle.Render(tags + fmt.Sprintf("%d/%d", min(m.selected+1, len(m.items)), len(m.items)))
 	leftWidth := max(10, m.width-lipgloss.Width(right)-2-lipgloss.Width(prefix))
 	left := prefix + style.Render(padToWidth(truncate(status, leftWidth), leftWidth))
 	return left + "  " + right
@@ -1145,6 +1212,8 @@ func (m *Model) renderHelp() string {
 		{"/", "Search (Enter runs, Esc cancels)"},
 		{"r", "Repeat current search"},
 		{"Enter", "Play selected result in mpv"},
+		{"d", "Download selected result"},
+		{"a", "Toggle audio-only (play and download)"},
 		{"y", "Copy URL with wl-copy"},
 		{"? / Esc", "Close this help"},
 		{"q", "Quit"},
