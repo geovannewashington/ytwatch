@@ -1057,7 +1057,7 @@ func (m *Model) previewMaxScroll() int {
 		baseLines += 1 + len(section) // blank separator + section lines
 	}
 	visible := max(1, m.bodyHeight()-baseLines)
-	return max(0, len(wrapLines(description, width, 1000))-visible)
+	return max(0, len(wrapDescription(description, width))-visible)
 }
 
 // bodyHeight is the content height of the panes: the terminal minus the
@@ -1573,7 +1573,7 @@ func (m *Model) renderPreview(width, height int) string {
 			description, _ = links.Annotate(description)
 		}
 		lines = append(lines, "", panelTitleStyle.Render("DESCRIPTION"))
-		descLines := wrapLines(description, width, 1000)
+		descLines := wrapDescription(description, width)
 		available := max(0, height-len(lines))
 		maxScroll := max(0, len(descLines)-available)
 		scroll := min(max(0, m.previewScroll), maxScroll)
@@ -1847,6 +1847,28 @@ func joinLinkMarkers(words []string) []string {
 		out = append(out, words[i])
 	}
 	return out
+}
+
+// wrapDescription wraps a description to width, keeping the line breaks and
+// blank lines the author wrote, like YouTube does. Several blank lines in a
+// row show as one, and blank lines at the start and end are dropped.
+func wrapDescription(text string, width int) []string {
+	text = strings.NewReplacer("\r\n", "\n", "\r", "\n").Replace(text)
+	var lines []string
+	for _, line := range strings.Split(text, "\n") {
+		wrapped := wrapLines(line, width, 1000)
+		if len(wrapped) == 0 {
+			if len(lines) > 0 && lines[len(lines)-1] != "" {
+				lines = append(lines, "")
+			}
+			continue
+		}
+		lines = append(lines, wrapped...)
+	}
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
 }
 
 func wrapLines(s string, width, maxLines int) []string {

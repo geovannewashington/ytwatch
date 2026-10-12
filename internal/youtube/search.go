@@ -26,7 +26,7 @@ const (
 	videoResultCount = 35
 	liveResultCount  = 20
 	playlistCount    = 10
-	shortResultCount = 8
+	shortResultCount = 6
 
 	// A filtered search is one query on the results page.
 	filteredResultCount   = 50

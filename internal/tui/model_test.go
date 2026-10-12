@@ -686,3 +686,40 @@ func TestResultsAreInsertedByRankAndTheSelectionStays(t *testing.T) {
 		t.Fatalf("equal ranks should keep arrival order: %v", m.items)
 	}
 }
+
+func TestWrapDescriptionKeepsLineBreaksAndBlankLines(t *testing.T) {
+	text := "\n\nFirst line\r\nSecond line is long enough to wrap around\n\n\n\nChapters\n0:00 Intro\n\n"
+	got := wrapDescription(text, 20)
+	want := []string{
+		"First line",
+		"Second line is long",
+		"enough to wrap",
+		"around",
+		"",
+		"Chapters",
+		"0:00 Intro",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got  %q\nwant %q", got, want)
+	}
+	if got := wrapDescription("   \n\n", 20); len(got) != 0 {
+		t.Fatalf("a blank description has no lines: %q", got)
+	}
+}
+
+func TestDescriptionKeepsItsBlankLinesInThePreview(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 120, 40
+	m.items = []media.Video{{ID: "video0001", Title: "T", Description: "Intro text\n\nSecond paragraph"}}
+	out := m.renderPreview(50, 30)
+	lines := strings.Split(out, "\n")
+	for i, line := range lines {
+		if strings.Contains(line, "Intro text") {
+			if !strings.Contains(lines[i+2], "Second paragraph") || strings.TrimSpace(lines[i+1]) != "" {
+				t.Fatalf("the blank line between paragraphs is lost:\n%s", strings.Join(lines[i:i+3], "\n"))
+			}
+			return
+		}
+	}
+	t.Fatalf("description not found:\n%s", out)
+}
