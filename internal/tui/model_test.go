@@ -32,7 +32,7 @@ func sampleVideos() []media.Video {
 	}
 }
 
-func TestSlashOpensCleanSearchPrompt(t *testing.T) {
+func TestSlashOpensTheCurrentQueryForEditing(t *testing.T) {
 	m := New("previous search")
 	m.searchMode = false
 	m.handleKey(runeKey('/'))
@@ -40,8 +40,8 @@ func TestSlashOpensCleanSearchPrompt(t *testing.T) {
 	if !m.searchMode {
 		t.Fatal("/ should activate search mode")
 	}
-	if m.searchInput != "" {
-		t.Fatalf("search input = %q, want empty input", m.searchInput)
+	if m.searchInput != "previous search" || m.searchCursor != len("previous search") {
+		t.Fatalf("input = %q cursor %d, want the query with the cursor at its end", m.searchInput, m.searchCursor)
 	}
 	if m.query != "previous search" {
 		t.Fatalf("current query unexpectedly changed: %q", m.query)
@@ -410,10 +410,10 @@ func TestFilterMenuAppliesOnEnterAndCancelsOnEsc(t *testing.T) {
 	if !m.showFilters {
 		t.Fatal("f should open the filter menu")
 	}
-	// Row 0 is Type; move to Duration (j) and pick the third option (l, l).
+	// Column 0 is Type; move to Duration (l) and pick the third option (j, j).
+	m.handleFilterKey(runeKey('l'))
 	m.handleFilterKey(runeKey('j'))
-	m.handleFilterKey(runeKey('l'))
-	m.handleFilterKey(runeKey('l'))
+	m.handleFilterKey(runeKey('j'))
 	if m.filters.Active() {
 		t.Fatal("changes must not apply before Enter")
 	}
@@ -429,9 +429,9 @@ func TestFilterMenuAppliesOnEnterAndCancelsOnEsc(t *testing.T) {
 
 	// Enter applies the draft and starts a search with it.
 	m.handleKey(runeKey('f'))
-	m.handleFilterKey(runeKey('j'))
-	m.handleFilterKey(runeKey('j'))
-	m.handleFilterKey(runeKey('l')) // Upload date: Today
+	m.handleFilterKey(runeKey('l'))
+	m.handleFilterKey(runeKey('l'))
+	m.handleFilterKey(runeKey('j')) // Upload date: Today
 	cmd := m.handleFilterKey(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil || m.showFilters || m.filters.Date != 1 {
 		t.Fatalf("Enter should apply and search: cmd=%v shown=%v filters=%+v", cmd != nil, m.showFilters, m.filters)
@@ -449,12 +449,12 @@ func TestFilterMenuAppliesOnEnterAndCancelsOnEsc(t *testing.T) {
 	}
 }
 
-func TestFiltersShowInTheHeaderAndKeepAfterNewSearch(t *testing.T) {
+func TestFiltersShowInTheFooterAndKeepAfterNewSearch(t *testing.T) {
 	m := New("test")
 	m.width, m.height = 120, 30
 	m.filters = youtube.Filters{Type: youtube.TypeLive, Date: 2}
-	if header := m.renderHeader(); !strings.Contains(header, "filters: Live, This week") {
-		t.Fatalf("header should list the filters:\n%s", header)
+	if footer := m.renderFooter(); !strings.Contains(footer, "Live · This week") {
+		t.Fatalf("footer should list the filters:\n%s", footer)
 	}
 	m.query = "x"
 	m.beginSearch("another query")
@@ -480,7 +480,7 @@ func TestFilterMenuFitsTheTerminal(t *testing.T) {
 				t.Errorf("%v: line %d is %d wide", size, i, w)
 			}
 		}
-		for _, want := range []string{"FILTERS", "[Playlists]", "[Over 20 minutes]", "[This year]", "What to search for", "Esc cancel"} {
+		for _, want := range []string{"SEARCH FILTERS", "DURATION", "UPLOAD DATE", "● Playlists", "● Over 20 minutes", "● This year", "What to search for", "Esc cancel"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("%v: menu is missing %q", size, want)
 			}
@@ -492,7 +492,7 @@ func TestFilterMenuExplainsTheFocusedRow(t *testing.T) {
 	m := New("test")
 	m.width, m.height = 100, 30
 	m.showFilters = true
-	m.filterRow = youtube.RowType
+	m.filterCol = youtube.RowType
 	out := m.View()
 	for _, want := range []string{"streams happening now"} {
 		if !strings.Contains(strings.Join(strings.Fields(out), " "), strings.Join(strings.Fields(want), " ")) {
@@ -507,7 +507,7 @@ func TestFilterMenuKeepsItsSizeOnEveryRow(t *testing.T) {
 	m.showFilters = true
 	var height, width int
 	for row := range youtube.Rows {
-		m.filterRow = row
+		m.filterCol = row
 		out := m.View()
 		h := strings.Count(out, "┌") + strings.Count(out, "│")
 		w := 0
@@ -521,5 +521,41 @@ func TestFilterMenuKeepsItsSizeOnEveryRow(t *testing.T) {
 		} else if h != height || w != width {
 			t.Errorf("row %d: box is %dx%d, row 0 is %dx%d", row, w, h, width, height)
 		}
+	}
+}
+
+func keyOf(s string) tea.KeyMsg {
+	switch s {
+	case "left":
+		return tea.KeyMsg{Type: tea.KeyLeft}
+	case "home":
+		return tea.KeyMsg{Type: tea.KeyHome}
+	case "delete":
+		return tea.KeyMsg{Type: tea.KeyDelete}
+	case "backspace":
+		return tea.KeyMsg{Type: tea.KeyBackspace}
+	case "enter":
+		return tea.KeyMsg{Type: tea.KeyEnter}
+	}
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+}
+
+func TestSearchInputEditsAtTheCursor(t *testing.T) {
+	m := New("golang tutorial")
+	m.handleKey(runeKey('/'))
+	for _, k := range []string{"left", "left", "left", "left", "left", "left", "left", "left", "backspace"} {
+		m.handleSearchInput(keyOf(k))
+	}
+	m.handleSearchInput(keyOf("é"))
+	if m.searchInput != "golangétutorial" {
+		t.Fatalf("input = %q", m.searchInput)
+	}
+	m.handleSearchInput(keyOf("home"))
+	m.handleSearchInput(keyOf("delete"))
+	if m.searchInput != "olangétutorial" || m.searchCursor != 0 {
+		t.Fatalf("input = %q cursor %d", m.searchInput, m.searchCursor)
+	}
+	if line := m.renderHeader(); !strings.Contains(line, "langétutorial") {
+		t.Fatalf("header should show the input:\n%s", line)
 	}
 }

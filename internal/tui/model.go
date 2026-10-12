@@ -82,15 +82,16 @@ type Model struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	query       string
-	searchInput string
-	searchMode  bool
-	showHelp    bool
+	query        string
+	searchInput  string
+	searchCursor int  // position in searchInput, in runes
+	searchMode   bool // the search line at the top is active
+	showHelp     bool
 
 	filters     youtube.Filters // applied to every search
 	showFilters bool
 	filterDraft youtube.Filters // edited in the menu, applied with Enter
-	filterRow   int
+	filterCol   int
 	searching   bool
 	searchDone  bool
 	searchError string
@@ -160,7 +161,7 @@ func New(initialQuery string) *Model {
 	}
 	if m.query == "" {
 		m.searchMode = true
-		m.searchInput = ""
+		m.setInput("")
 		m.status = "Type a query and press Enter"
 	}
 	return m
@@ -204,7 +205,7 @@ func (m *Model) beginSearch(query string) tea.Cmd {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		m.searchMode = true
-		m.searchInput = m.query
+		m.setInput(m.query)
 		m.status = "Enter a search query"
 		return nil
 	}
@@ -224,7 +225,7 @@ func (m *Model) beginSearch(query string) tea.Cmd {
 	m.generation++
 	generation := m.generation
 	m.query = query
-	m.searchInput = query
+	m.setInput(query)
 	m.searchMode = false
 	m.searching = true
 	m.searchDone = false
@@ -469,9 +470,24 @@ func (m *Model) handleSearchEvent(event youtube.Event) []tea.Cmd {
 	return nil
 }
 
+// setInput replaces the text of the search line and puts the cursor at its end.
+func (m *Model) setInput(text string) {
+	m.searchInput = text
+	m.searchCursor = len([]rune(text))
+}
+
+// handleSearchInput edits the search line. The cursor moves with the arrows,
+// Home and End, like in a shell.
 func (m *Model) handleSearchInput(msg tea.KeyMsg) tea.Cmd {
+	runes := []rune(m.searchInput)
+	cursor := min(max(m.searchCursor, 0), len(runes))
+	edit := func(from, to int, insert string) {
+		out := append(append(append([]rune{}, runes[:from]...), []rune(insert)...), runes[to:]...)
+		m.searchInput = string(out)
+		m.searchCursor = from + len([]rune(insert))
+	}
 	if msg.Paste {
-		m.searchInput += string(msg.Runes)
+		edit(cursor, cursor, strings.Join(strings.Fields(string(msg.Runes)), " "))
 		return nil
 	}
 	switch msg.String() {
@@ -485,28 +501,51 @@ func (m *Model) handleSearchInput(msg tea.KeyMsg) tea.Cmd {
 	case "esc":
 		m.searchMode = false
 		m.status = "Search cancelled"
+	case "left", "ctrl+b":
+		m.searchCursor = max(cursor-1, 0)
+	case "right", "ctrl+f":
+		m.searchCursor = min(cursor+1, len(runes))
+	case "home", "ctrl+a":
+		m.searchCursor = 0
+	case "end", "ctrl+e":
+		m.searchCursor = len(runes)
 	case "backspace", "ctrl+h":
-		if len(m.searchInput) > 0 {
-			runes := []rune(m.searchInput)
-			m.searchInput = string(runes[:len(runes)-1])
+		if cursor > 0 {
+			edit(cursor-1, cursor, "")
+		}
+	case "delete", "ctrl+d":
+		if cursor < len(runes) {
+			edit(cursor, cursor+1, "")
 		}
 	case "ctrl+u":
-		m.searchInput = ""
+		edit(0, cursor, "")
+	case "ctrl+k":
+		edit(cursor, len(runes), "")
 	case "ctrl+w":
-		m.searchInput = strings.TrimRightFunc(m.searchInput, unicode.IsSpace)
-		if i := strings.LastIndexFunc(m.searchInput, unicode.IsSpace); i >= 0 {
-			m.searchInput = m.searchInput[:i+1]
-		} else {
-			m.searchInput = ""
+		start := cursor
+		for start > 0 && unicode.IsSpace(runes[start-1]) {
+			start--
 		}
+		for start > 0 && !unicode.IsSpace(runes[start-1]) {
+			start--
+		}
+		edit(start, cursor, "")
 	case " ":
-		m.searchInput += " "
+		edit(cursor, cursor, " ")
 	default:
 		if msg.Type == tea.KeyRunes {
-			m.searchInput += string(msg.Runes)
+			edit(cursor, cursor, string(msg.Runes))
 		}
 	}
 	return nil
+}
+
+// openFilters shows the filter menu.
+func (m *Model) openFilters() {
+	m.showFilters = true
+	m.filterDraft = m.filters
+	m.filterCol = 0
+	m.overlay.Remove()
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
@@ -555,21 +594,17 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.cancel()
 		return tea.Quit
 	case "/":
-		// Start with a clean query so the next typed characters don't
-		// accidentally append to the previous search.
+		// The current query is there to edit; Ctrl+U clears it.
 		m.searchMode = true
-		m.searchInput = ""
-		m.status = "Search | Enter runs | Esc cancels | Ctrl+U clears"
+		m.setInput(m.query)
+		m.status = "Edit the search | Enter runs | Esc cancels | Ctrl+U clears"
 		return nil
 	case "?":
 		m.showHelp = true
 		m.overlay.Remove()
 		return nil
 	case "f":
-		m.showFilters = true
-		m.filterDraft = m.filters
-		m.filterRow = 0
-		m.overlay.Remove()
+		m.openFilters()
 		return nil
 	case "esc":
 		m.status = "Ready"
@@ -1087,22 +1122,18 @@ func (m *Model) View() string {
 
 func (m *Model) renderHeader() string {
 	brand := titleStyle.Render("ytwatch") + taglineStyle.Render("  -  search YouTube, play in mpv")
-	query := m.query
-	if m.searchMode {
-		query = tailTruncate(m.searchInput+"_", max(10, m.width-8))
-	}
 	searchLine := searchStyle.Render("> ")
-	if query == "" {
+	switch {
+	case m.searchMode:
+		searchLine += renderInput(m.searchInput, m.searchCursor, max(10, m.width-8))
+	case m.query == "":
 		searchLine += helpStyle.Render("press / to search videos, Shorts and live streams")
-	} else {
-		searchLine += truncate(query, max(10, m.width-8))
-	}
-	if summary := m.filters.Summary(); summary != "" && !m.searchMode {
-		searchLine += keyStyle.Render("   filters: " + truncate(summary, max(10, m.width-lipgloss.Width(searchLine)-14)))
+	default:
+		searchLine += truncate(m.query, max(10, m.width-8))
 	}
 	keys := "j/k move | h/l panes | Enter play | / search | f filters | ? help | q quit"
 	if m.searchMode {
-		keys = "Enter search | Esc cancel | Ctrl+U clear | Ctrl+W delete word"
+		keys = "Enter search | Esc cancel | arrows move | Ctrl+U clear | Ctrl+W delete word"
 	}
 	center := func(s string) string {
 		return lipgloss.PlaceHorizontal(m.width, lipgloss.Center, s)
@@ -1380,6 +1411,9 @@ func (m *Model) renderFooter() string {
 		prefix = ""
 	}
 	tags := ""
+	if summary := m.filters.Summary(); summary != "" {
+		tags += truncate(strings.ReplaceAll(summary, ", ", " · "), max(10, m.width/3)) + "  "
+	}
 	if m.audioOnly {
 		tags += "♪ audio  "
 	}
@@ -1392,18 +1426,20 @@ func (m *Model) renderFooter() string {
 	return left + "  " + right
 }
 
-// handleFilterKey edits the filter draft. Enter applies it and searches again.
+// handleFilterKey edits the filter draft. The menu has one column per filter:
+// h/l change the column and j/k pick its option. Enter applies the draft and
+// searches again.
 func (m *Model) handleFilterKey(msg tea.KeyMsg) tea.Cmd {
-	rows := len(youtube.Rows)
+	columns := len(youtube.Rows)
 	switch msg.String() {
-	case "j", "down", "tab", "ctrl+n":
-		m.filterRow = (m.filterRow + 1) % rows
-	case "k", "up", "shift+tab", "ctrl+p":
-		m.filterRow = (m.filterRow + rows - 1) % rows
-	case "l", "right", " ":
-		m.filterDraft.Set(m.filterRow, m.filterDraft.Get(m.filterRow)+1)
-	case "h", "left":
-		m.filterDraft.Set(m.filterRow, m.filterDraft.Get(m.filterRow)-1)
+	case "l", "right", "tab":
+		m.filterCol = (m.filterCol + 1) % columns
+	case "h", "left", "shift+tab":
+		m.filterCol = (m.filterCol + columns - 1) % columns
+	case "j", "down", "ctrl+n", " ":
+		m.filterDraft.Set(m.filterCol, m.filterDraft.Get(m.filterCol)+1)
+	case "k", "up", "ctrl+p":
+		m.filterDraft.Set(m.filterCol, m.filterDraft.Get(m.filterCol)-1)
 	case "x":
 		m.filterDraft = youtube.Filters{}
 	case "enter":
@@ -1421,39 +1457,48 @@ func (m *Model) handleFilterKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
-// filterHelpLines is the fixed height of the help text in the filter menu.
-const filterHelpLines = 2
+// filterColumnWidth is the width of one column of the filter menu.
+const filterColumnWidth = 19
 
+// renderFilters draws the filter menu as one column per filter, like the
+// filter menu of youtube.com. The chosen option of each column is marked.
 func (m *Model) renderFilters() string {
-	var b strings.Builder
-	b.WriteString(panelTitleStyle.Render("FILTERS") + "\n\n")
-	for row, def := range youtube.Rows {
-		cursor := "  "
-		if row == m.filterRow {
-			cursor = searchStyle.Render("> ")
+	height := 0
+	for _, def := range youtube.Rows {
+		height = max(height, len(def.Options))
+	}
+	chosen := lipgloss.NewStyle().Bold(true)
+	columns := make([]string, len(youtube.Rows))
+	for col, def := range youtube.Rows {
+		focused := col == m.filterCol
+		head, rule := helpStyle, helpStyle
+		if focused {
+			head, rule = panelTitleStyle, searchStyle
 		}
-		b.WriteString(cursor + padToWidth(def.Name, 12))
-		for i, option := range def.Options {
-			if i == m.filterDraft.Get(row) {
-				b.WriteString(selectedTitleStyle.Render("[" + option + "]"))
-			} else {
-				b.WriteString(helpStyle.Render(" " + option + " "))
+		lines := []string{
+			head.Render(strings.ToUpper(def.Name)),
+			rule.Render(strings.Repeat("─", filterColumnWidth-3)),
+		}
+		for i := 0; i < height; i++ {
+			switch {
+			case i >= len(def.Options):
+				lines = append(lines, "")
+			case i == m.filterDraft.Get(col) && focused:
+				lines = append(lines, selectedTitleStyle.Render("● "+def.Options[i]))
+			case i == m.filterDraft.Get(col):
+				lines = append(lines, chosen.Render("● "+def.Options[i]))
+			default:
+				lines = append(lines, helpStyle.Render("○ "+def.Options[i]))
 			}
 		}
-		b.WriteString("\n")
+		columns[col] = lipgloss.NewStyle().Width(filterColumnWidth).Render(strings.Join(lines, "\n"))
 	}
-	b.WriteString("\n")
-	// The help always takes the same number of lines, so the box does not
-	// change size while the cursor moves between rows.
-	help := wrapLines(youtube.Rows[m.filterRow].Help, 58, filterHelpLines)
-	for i := 0; i < filterHelpLines; i++ {
-		line := ""
-		if i < len(help) {
-			line = help[i]
-		}
-		b.WriteString(metaStyle.Render("  "+line) + "\n")
-	}
-	b.WriteString("\n" + helpStyle.Render("j/k row | h/l change | Enter search | x reset | Esc cancel"))
+	var b strings.Builder
+	b.WriteString(panelTitleStyle.Render("SEARCH FILTERS") + "\n\n")
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, columns...) + "\n\n")
+	// The help is always one line, so the box keeps its size between columns.
+	b.WriteString(metaStyle.Render(truncate(youtube.Rows[m.filterCol].Help, filterColumnWidth*len(columns))) + "\n")
+	b.WriteString(helpStyle.Render("j/k option | h/l column | Enter search | x reset | Esc cancel"))
 	box := helpBoxStyle.Render(b.String())
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
@@ -1467,11 +1512,11 @@ func (m *Model) renderHelp() string {
 		{"H / M / L", "Top / middle / bottom of visible list"},
 		{"Ctrl+d/u, Ctrl+f/b", "Half-page / full-page down / up"},
 		{"h / l, Tab", "Focus results / preview (Tab toggles)"},
-		{"/ , r", "Search (Enter runs, Esc cancels) / repeat it"},
-		{"f", "Filters: type, duration, date, live, sort"},
+		{"/ , r", "Edit the search (Enter runs) / repeat it"},
+		{"f", "Filters: type, duration, upload date"},
+		{"t", "Cycle the color theme"},
 		{"Enter", "Play selected result in mpv"},
 		{"d / a", "Download selected / toggle audio-only"},
-		{"t", "Cycle the color theme"},
 		{"o / y", "Open / copy URL (3o, 3y: description link 3)"},
 		{"? / Esc", "Close this help"},
 		{"q", "Quit"},
@@ -1666,3 +1711,25 @@ func tailTruncate(s string, width int) string {
 }
 
 var _ tea.Model = (*Model)(nil)
+
+// renderInput draws the input line with a block cursor, scrolled sideways so
+// that the cursor stays inside width columns.
+func renderInput(text string, cursor, width int) string {
+	runes := []rune(sanitize(text))
+	cursor = min(max(cursor, 0), len(runes))
+	start := 0
+	for lipgloss.Width(string(runes[start:cursor]))+1 > width {
+		start++
+	}
+	end := len(runes)
+	for end > cursor && lipgloss.Width(string(runes[start:end]))+1 > width {
+		end--
+	}
+	under := " "
+	after := ""
+	if cursor < end {
+		under = string(runes[cursor])
+		after = string(runes[cursor+1 : end])
+	}
+	return string(runes[start:cursor]) + lipgloss.NewStyle().Reverse(true).Render(under) + after
+}
