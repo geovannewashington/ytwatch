@@ -61,12 +61,17 @@ func TestShortRankingPutsMatchingTitlesFirst(t *testing.T) {
 		t.Errorf("a matching Short at position 0 has rank %d", got)
 	}
 	// Otherwise it joins the group after the first few results, in order.
-	a, b := rank(0, "Something else"), rank(1, "Another one")
-	if a != shortGroupBase || b <= a || a < mainRanking.at(5) {
+	// The first Short of the page is YouTube's best match, whatever its title
+	// says (it may be translated).
+	if got := rank(0, "Ninguém está lendo nada"); got != shortFirstRank {
+		t.Errorf("the first Short has rank %d, want %d", got, shortFirstRank)
+	}
+	a, b := rank(1, "Something else"), rank(2, "Another one")
+	if a != shortGroupBase+3 || b <= a || a < mainRanking.at(5) {
 		t.Errorf("group ranks = %d, %d", a, b)
 	}
 	// An empty query matches nothing.
-	if got := shortRanking("")(0, "x"); got != shortGroupBase {
+	if got := shortRanking("")(1, "x"); got != shortGroupBase+3 {
 		t.Errorf("empty query rank = %d", got)
 	}
 }

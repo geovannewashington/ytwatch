@@ -133,13 +133,16 @@ func text(node map[string]any, path ...string) string {
 // of another source (see mainRanking).
 const (
 	shortMatchOffset = 3  // after the regular result at the same position
-	shortGroupBase   = 52 // the group after the first few results
+	shortFirstRank   = 34 // YouTube's best Short for the query, after 4 results
+	shortGroupBase   = 52 // the other Shorts, after the first few results
 )
 
 // shortRanking places Shorts in a mixed search. A Short with exactly the title
 // searched for goes first. A Short whose title has every
 // word of the query is as good a match as a regular result, so it goes right
-// after the regular result at the same position. The other Shorts form a group
+// after the regular result at the same position. The first Short of the page
+// is YouTube's best match, even when its title is translated and so does not
+// have the words searched for, so it comes next. The other Shorts form a group
 // after the first few results, like the Shorts shelf on youtube.com.
 func shortRanking(query string) func(position int, title string) int {
 	words := queryWords(query)
@@ -150,6 +153,9 @@ func shortRanking(query string) func(position int, title string) int {
 		}
 		if len(words) > 0 && containsAll(title, words) {
 			return mainRanking.at(position) + shortMatchOffset
+		}
+		if position == 0 {
+			return shortFirstRank
 		}
 		return shortGroupBase + position*3
 	}
