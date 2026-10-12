@@ -13,6 +13,7 @@ import (
 
 	"github.com/geovannewashington/ytwatch/internal/config"
 	"github.com/geovannewashington/ytwatch/internal/media"
+	"github.com/geovannewashington/ytwatch/internal/quality"
 )
 
 // fileTemplate keeps names short and unique: the title is cut to 150 bytes and
@@ -36,15 +37,17 @@ func ExpandDir(dir string) (string, error) {
 
 // buildArgs returns the yt-dlp arguments. User arguments come last so they
 // can override the defaults, for example -f.
-func buildArgs(url, dir string, cfg config.Config, audioOnly bool) []string {
+func buildArgs(url, dir string, cfg config.Config, opts Options) []string {
 	args := []string{
 		"--no-playlist", "--no-warnings", "--quiet",
 		// --print makes yt-dlp skip the download unless told otherwise.
 		"--no-simulate", "--print", "after_move:filepath",
 		"-P", dir, "-o", fileTemplate,
 	}
-	if audioOnly {
+	if opts.AudioOnly {
 		args = append(args, "-f", audioFormat)
+	} else if format := quality.Format(opts.Quality); format != "" {
+		args = append(args, "-f", format)
 	}
 	if cfg.MPV.CookiesFromBrowser != "" {
 		args = append(args, "--cookies-from-browser", cfg.MPV.CookiesFromBrowser)
@@ -53,9 +56,16 @@ func buildArgs(url, dir string, cfg config.Config, audioOnly bool) []string {
 	return append(args, "--", url)
 }
 
+// Options are the choices made in the interface for one download.
+type Options struct {
+	AudioOnly bool
+	// Quality is a level of package quality; empty or "best" has no limit.
+	Quality string
+}
+
 // Run downloads v and returns the path of the saved file. It blocks until
 // yt-dlp ends, and stops it when ctx is cancelled.
-func Run(ctx context.Context, v media.Video, cfg config.Config, audioOnly bool) (string, error) {
+func Run(ctx context.Context, v media.Video, cfg config.Config, opts Options) (string, error) {
 	if v.IsPlaylist() {
 		return "", errors.New("playlists cannot be downloaded yet")
 	}
@@ -73,7 +83,7 @@ func Run(ctx context.Context, v media.Video, cfg config.Config, audioOnly bool) 
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("create download folder: %w", err)
 	}
-	cmd := exec.CommandContext(ctx, "yt-dlp", buildArgs(url, dir, cfg, audioOnly)...)
+	cmd := exec.CommandContext(ctx, "yt-dlp", buildArgs(url, dir, cfg, opts)...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {

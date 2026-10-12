@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/geovannewashington/ytwatch/internal/quality"
 	"github.com/geovannewashington/ytwatch/internal/theme"
 )
 
@@ -86,6 +87,9 @@ type General struct {
 	// AudioOnly starts ytwatch in audio-only mode. It applies to playback and
 	// downloads, and can be toggled with "a".
 	AudioOnly bool
+	// Quality is the video quality for playing and downloading: best (the
+	// default), 1080p, 720p, 480p or 360p. It can be changed with "Q".
+	Quality string
 }
 
 type Download struct {
@@ -124,6 +128,7 @@ type Chat struct {
 
 func Default() Config {
 	return Config{
+		General:  General{Quality: quality.Best},
 		Chat:     Chat{Enabled: true},
 		Download: Download{Dir: "~/Downloads/ytwatch"},
 		History:  History{Enabled: true, MaxAgeDays: 30, MaxEntries: 100},
@@ -215,6 +220,16 @@ func (c *Config) set(section, key, raw string) error {
 		c.General.Browser, err = parseString(raw)
 	case "general.audio_only":
 		c.General.AudioOnly, err = strconv.ParseBool(raw)
+	case "general.quality":
+		var value string
+		value, err = parseString(raw)
+		if err == nil {
+			value = quality.Normalize(value)
+			if !quality.Valid(value) {
+				return fmt.Errorf("invalid quality %q (%s)", value, strings.Join(quality.Levels, ", "))
+			}
+			c.General.Quality = value
+		}
 	case "download.dir":
 		c.Download.Dir, err = parseString(raw)
 	case "download.args":

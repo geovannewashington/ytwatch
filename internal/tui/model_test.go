@@ -610,3 +610,41 @@ func TestNoHistoryMeansUpAndDownDoNothing(t *testing.T) {
 		t.Fatalf("input = %q", m.searchInput)
 	}
 }
+
+func TestQualityMenuPicksAndShowsInTheFooter(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 100, 30
+	if m.quality != "" && m.quality != "best" {
+		t.Fatalf("quality = %q", m.quality)
+	}
+	m.handleKey(runeKey('Q'))
+	if !m.showQuality {
+		t.Fatal("Q should open the quality menu")
+	}
+	out := m.View()
+	for _, want := range []string{"VIDEO QUALITY", "Best available", "Up to 1080p", "Up to 360p", "Esc cancel"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("menu is missing %q", want)
+		}
+	}
+	m.handleQualityKey(runeKey('j'))
+	m.handleQualityKey(runeKey('j')) // Up to 720p
+	m.handleQualityKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.showQuality || m.quality != "720p" {
+		t.Fatalf("quality = %q, menu open = %v", m.quality, m.showQuality)
+	}
+	if !strings.Contains(m.renderFooter(), "720p") {
+		t.Fatalf("footer should show the quality: %q", m.renderFooter())
+	}
+	// Esc leaves it unchanged, and the menu opens on the current level.
+	m.handleKey(runeKey('Q'))
+	m.handleQualityKey(runeKey('j'))
+	m.handleQualityKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.quality != "720p" {
+		t.Fatalf("Esc changed the quality to %q", m.quality)
+	}
+	m.handleKey(runeKey('Q'))
+	if m.qualityDraft != 2 {
+		t.Fatalf("menu should start on the current level, got %d", m.qualityDraft)
+	}
+}

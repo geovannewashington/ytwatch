@@ -14,6 +14,7 @@ import (
 
 	"github.com/geovannewashington/ytwatch/internal/config"
 	"github.com/geovannewashington/ytwatch/internal/media"
+	"github.com/geovannewashington/ytwatch/internal/quality"
 	"github.com/geovannewashington/ytwatch/internal/wm"
 )
 
@@ -102,9 +103,17 @@ func shorten(line string) string {
 	return line
 }
 
-// Start opens v in mpv. With audioOnly, mpv skips the video stream; the window
-// stays so playback can still be controlled.
-func Start(v media.Video, cfg config.Config, audioOnly bool) (*Process, error) {
+// Options are the choices made in the interface for one playback.
+type Options struct {
+	// AudioOnly makes mpv skip the video stream; the window stays so playback
+	// can still be controlled.
+	AudioOnly bool
+	// Quality is a level of package quality; empty or "best" has no limit.
+	Quality string
+}
+
+// Start opens v in mpv.
+func Start(v media.Video, cfg config.Config, opts Options) (*Process, error) {
 	url := v.CanonicalURL()
 	if url == "" {
 		return nil, fmt.Errorf("could not determine a playable URL")
@@ -121,8 +130,10 @@ func Start(v media.Video, cfg config.Config, audioOnly bool) (*Process, error) {
 		"--force-window=yes", "--quiet", "--title=" + mpvTitlePrefix + title,
 		"--ytdl-raw-options-append=extractor-args=youtube:player_client=default,web_safari",
 	}
-	if audioOnly {
+	if opts.AudioOnly {
 		args = append(args, "--no-video", "--ytdl-format=bestaudio/best")
+	} else if format := quality.Format(opts.Quality); format != "" {
+		args = append(args, "--ytdl-format="+format)
 	}
 	// Forcing the Wayland context would break mpv on X11 sessions.
 	if os.Getenv("WAYLAND_DISPLAY") != "" {

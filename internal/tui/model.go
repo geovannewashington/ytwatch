@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/geovannewashington/ytwatch/internal/media"
 	"github.com/geovannewashington/ytwatch/internal/player"
 	"github.com/geovannewashington/ytwatch/internal/preview"
+	"github.com/geovannewashington/ytwatch/internal/quality"
 	"github.com/geovannewashington/ytwatch/internal/theme"
 	"github.com/geovannewashington/ytwatch/internal/youtube"
 )
@@ -92,14 +94,17 @@ type Model struct {
 	historyDraft string // what was typed before browsing
 	showHelp     bool
 
-	filters     youtube.Filters // applied to every search
-	showFilters bool
-	filterDraft youtube.Filters // edited in the menu, applied with Enter
-	filterCol   int
-	searching   bool
-	searchDone  bool
-	searchError string
-	status      string
+	filters      youtube.Filters // applied to every search
+	showFilters  bool
+	quality      string // see package quality
+	showQuality  bool
+	qualityDraft int
+	filterDraft  youtube.Filters // edited in the menu, applied with Enter
+	filterCol    int
+	searching    bool
+	searchDone   bool
+	searchError  string
+	status       string
 
 	generation   int
 	searchCancel context.CancelFunc
@@ -176,6 +181,7 @@ func New(initialQuery string) *Model {
 func (m *Model) SetConfig(cfg config.Config) {
 	m.cfg = cfg
 	m.audioOnly = cfg.General.AudioOnly
+	m.quality = quality.Normalize(cfg.General.Quality)
 	m.overlay.Configure(cfg.Preview.Output)
 	m.history = nil
 	if cfg.History.Enabled {
@@ -295,7 +301,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.keepSelectionVisible()
 		m.scrollPreview(0)
-		if m.width < wideWidth || m.height < minHeight || m.showHelp || m.showFilters {
+		if m.width < wideWidth || m.height < minHeight || m.showHelp || m.showFilters || m.showQuality {
 			m.overlay.Remove()
 		} else {
 			m.showSelectedThumbnail()
@@ -426,6 +432,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.showFilters {
 			return m, m.handleFilterKey(msg)
+		}
+		if m.showQuality {
+			m.handleQualityKey(msg)
+			return m, nil
 		}
 		return m, m.handleKey(msg)
 	}
@@ -654,6 +664,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	case "f":
 		m.openFilters()
+		return nil
+	case "Q", "shift+q":
+		m.showQuality = true
+		m.qualityDraft = max(slices.Index(quality.Levels, m.quality), 0)
+		m.overlay.Remove()
 		return nil
 	case "esc":
 		m.status = "Ready"
@@ -1092,7 +1107,7 @@ func (m *Model) playSelected() tea.Cmd {
 		m.status = "Already playing: " + v.Title
 		return nil
 	}
-	cmd, err := player.Start(v, m.cfg, m.audioOnly)
+	cmd, err := player.Start(v, m.cfg, player.Options{AudioOnly: m.audioOnly, Quality: m.quality})
 	if err != nil {
 		m.status = err.Error()
 		return nil
@@ -1135,9 +1150,10 @@ func (m *Model) downloadSelected() tea.Cmd {
 	}
 	m.downloading[v.ID] = v.Title
 	m.status = "⬇ Downloading | " + clean(v.Title)
-	ctx, cfg, audioOnly := m.ctx, m.cfg, m.audioOnly
+	ctx, cfg := m.ctx, m.cfg
+	opts := download.Options{AudioOnly: m.audioOnly, Quality: m.quality}
 	return func() tea.Msg {
-		path, err := download.Run(ctx, v, cfg, audioOnly)
+		path, err := download.Run(ctx, v, cfg, opts)
 		return downloadDoneMsg{id: v.ID, title: v.Title, path: path, err: err}
 	}
 }
@@ -1165,6 +1181,9 @@ func (m *Model) View() string {
 	}
 	if m.showFilters {
 		return m.renderFilters()
+	}
+	if m.showQuality {
+		return m.renderQuality()
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, m.renderHeader(), m.renderBody(), m.renderFooter())
 }
@@ -1463,6 +1482,9 @@ func (m *Model) renderFooter() string {
 	if summary := m.filters.Summary(); summary != "" {
 		tags += truncate(strings.ReplaceAll(summary, ", ", " · "), max(10, m.width/3)) + "  "
 	}
+	if m.quality != "" && m.quality != quality.Best {
+		tags += m.quality + "  "
+	}
 	if m.audioOnly {
 		tags += "♪ audio  "
 	}
@@ -1504,6 +1526,48 @@ func (m *Model) handleFilterKey(msg tea.KeyMsg) tea.Cmd {
 		m.showSelectedThumbnail()
 	}
 	return nil
+}
+
+// handleQualityKey moves in the quality menu. Enter picks the level for playing
+// and downloading until ytwatch is closed.
+func (m *Model) handleQualityKey(msg tea.KeyMsg) {
+	n := len(quality.Levels)
+	switch msg.String() {
+	case "j", "down", "tab", "ctrl+n":
+		m.qualityDraft = (m.qualityDraft + 1) % n
+	case "k", "up", "shift+tab", "ctrl+p":
+		m.qualityDraft = (m.qualityDraft + n - 1) % n
+	case "enter":
+		m.showQuality = false
+		m.quality = quality.Levels[m.qualityDraft]
+		m.status = "Quality: " + m.quality + " | applies to playing and downloading, set [general] quality to keep it"
+		m.showSelectedThumbnail()
+	case "esc", "q", "Q":
+		m.showQuality = false
+		m.showSelectedThumbnail()
+	}
+}
+
+// renderQuality draws the quality menu.
+func (m *Model) renderQuality() string {
+	var b strings.Builder
+	b.WriteString(panelTitleStyle.Render("VIDEO QUALITY") + "\n\n")
+	for i, level := range quality.Levels {
+		label := "Up to " + level
+		if level == quality.Best {
+			label = "Best available"
+		}
+		switch {
+		case i == m.qualityDraft:
+			b.WriteString(selectedTitleStyle.Render("● "+label) + "\n")
+		default:
+			b.WriteString(helpStyle.Render("○ "+label) + "\n")
+		}
+	}
+	b.WriteString("\n" + metaStyle.Render("Applies to playing and downloading.") + "\n")
+	b.WriteString(helpStyle.Render("j/k option | Enter choose | Esc cancel"))
+	box := helpBoxStyle.Render(b.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 
 // filterColumnWidth is the width of one column of the filter menu.
@@ -1565,7 +1629,7 @@ func (m *Model) renderHelp() string {
 		{"f", "Filters: type, duration, upload date"},
 		{"t", "Cycle the color theme"},
 		{"Enter", "Play selected result in mpv"},
-		{"d / a", "Download selected / toggle audio-only"},
+		{"d / a / Q", "Download / audio-only / video quality"},
 		{"o / y", "Open / copy URL (3o, 3y: description link 3)"},
 		{"? / Esc", "Close this help"},
 		{"q", "Quit"},

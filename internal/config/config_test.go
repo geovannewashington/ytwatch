@@ -191,3 +191,16 @@ func TestParseHistory(t *testing.T) {
 		t.Fatal("0 entries should be rejected")
 	}
 }
+
+func TestParseQuality(t *testing.T) {
+	if Default().General.Quality != "best" {
+		t.Fatalf("default quality = %q", Default().General.Quality)
+	}
+	cfg, err := Parse("[general]\nquality = \"720P\"\n")
+	if err != nil || cfg.General.Quality != "720p" {
+		t.Fatalf("quality = %q, err = %v", cfg.General.Quality, err)
+	}
+	if _, err := Parse("[general]\nquality = \"4k\"\n"); err == nil {
+		t.Fatal("4k should be rejected")
+	}
+}

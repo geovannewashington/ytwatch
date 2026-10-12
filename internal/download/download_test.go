@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -18,7 +19,7 @@ func TestBuildArgsAudioOnlyAndUserArgsLast(t *testing.T) {
 	cfg.MPV.CookiesFromBrowser = "firefox"
 	cfg.Download.Args = []string{"--embed-metadata"}
 
-	args := buildArgs("https://youtu.be/x", "/tmp/d", cfg, true)
+	args := buildArgs("https://youtu.be/x", "/tmp/d", cfg, Options{AudioOnly: true})
 
 	want := []string{"-f", audioFormat, "--cookies-from-browser", "firefox", "--embed-metadata", "--", "https://youtu.be/x"}
 	if got := args[len(args)-len(want):]; !reflect.DeepEqual(got, want) {
@@ -27,10 +28,23 @@ func TestBuildArgsAudioOnlyAndUserArgsLast(t *testing.T) {
 }
 
 func TestBuildArgsVideoHasNoFormat(t *testing.T) {
-	for _, a := range buildArgs("u", "/tmp/d", config.Default(), false) {
+	for _, a := range buildArgs("u", "/tmp/d", config.Default(), Options{}) {
 		if a == "-f" {
 			t.Fatal("video download should use the yt-dlp default format")
 		}
+	}
+}
+
+func TestBuildArgsQualityLimitsTheHeight(t *testing.T) {
+	args := buildArgs("u", "/tmp/d", config.Default(), Options{Quality: "720p"})
+	i := slices.Index(args, "-f")
+	if i < 0 || args[i+1] != "bestvideo[height<=720]+bestaudio/best[height<=720]/best" {
+		t.Fatalf("args = %v", args)
+	}
+	// Audio-only wins over a quality: there is no video to limit.
+	args = buildArgs("u", "/tmp/d", config.Default(), Options{Quality: "720p", AudioOnly: true})
+	if i := slices.Index(args, "-f"); i < 0 || args[i+1] != audioFormat {
+		t.Fatalf("args = %v", args)
 	}
 }
 
@@ -74,7 +88,7 @@ func TestRunRejectsLiveAndUpcoming(t *testing.T) {
 		{ID: "video0001", IsLive: true},
 		{ID: "video0002", LiveStatus: "is_upcoming"},
 	} {
-		if _, err := Run(context.Background(), v, cfg, false); err == nil {
+		if _, err := Run(context.Background(), v, cfg, Options{}); err == nil {
 			t.Fatalf("want error for %+v", v)
 		}
 	}
