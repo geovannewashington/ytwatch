@@ -20,8 +20,12 @@ type Config struct {
 }
 
 type MPV struct {
-	// Workspace is the sway workspace mpv windows are moved to. Empty leaves
-	// the window where sway puts it.
+	// Workspace is the workspace mpv windows are moved to. Supported: sway,
+	// i3, Hyprland, niri, bspwm, and X11 window managers with EWMH support
+	// (needs wmctrl). The value uses the window manager's own syntax:
+	// sway/i3/niri accept a name or number, Hyprland "3" or "name:video",
+	// bspwm a desktop name or "^2", wmctrl a number counted from 1. Empty
+	// leaves the window where the window manager puts it.
 	Workspace string
 	// Args are extra command-line arguments passed to mpv.
 	Args []string
@@ -34,7 +38,7 @@ type MPV struct {
 type Chat struct {
 	// Enabled controls whether live streams open YouTube's chat pop-out.
 	Enabled bool
-	// Workspace is the sway workspace the chat window is moved to.
+	// Workspace is the workspace the chat window is moved to. See MPV.Workspace.
 	Workspace string
 	// Browser is the command used to open the chat window.
 	Browser string

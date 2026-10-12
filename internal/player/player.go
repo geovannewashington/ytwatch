@@ -12,7 +12,7 @@ import (
 
 	"github.com/geovannewashington/ytwatch/internal/config"
 	"github.com/geovannewashington/ytwatch/internal/media"
-	"github.com/geovannewashington/ytwatch/internal/sway"
+	"github.com/geovannewashington/ytwatch/internal/wm"
 )
 
 // mpvTitlePrefix identifies windows opened by ytwatch so they can be placed.
@@ -138,12 +138,13 @@ func Start(v media.Video, cfg config.Config) (*Process, error) {
 	cmd.Stdout, cmd.Stderr = out, out
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
-	before := sway.Snapshot()
+	backend := wm.Detect()
+	before := wm.Snapshot(backend)
 	if err := cmd.Start(); err != nil {
 		out.Close()
 		return nil, fmt.Errorf("launch mpv: %w", err)
 	}
-	go sway.MoveNew(before, func(w sway.Window) bool {
+	go wm.MoveNew(backend, before, func(w wm.Window) bool {
 		return strings.HasPrefix(w.Title, mpvTitlePrefix)
 	}, cfg.MPV.Workspace)
 	return &Process{cmd: cmd, out: out}, nil
@@ -169,7 +170,8 @@ func OpenYouTubeChat(v media.Video, cfg config.Config) error {
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, io.Discard, io.Discard
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
-	before := sway.Snapshot()
+	backend := wm.Detect()
+	before := wm.Snapshot(backend)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("launch chat browser: %w", err)
 	}
@@ -177,7 +179,7 @@ func OpenYouTubeChat(v media.Video, cfg config.Config) error {
 	// An already-running browser hands the URL to its main process, so match
 	// any new window of that browser rather than the pid we started.
 	name := strings.ToLower(filepath.Base(browser))
-	go sway.MoveNew(before, func(w sway.Window) bool {
+	go wm.MoveNew(backend, before, func(w wm.Window) bool {
 		return strings.Contains(strings.ToLower(w.App), name)
 	}, cfg.Chat.Workspace)
 	return nil

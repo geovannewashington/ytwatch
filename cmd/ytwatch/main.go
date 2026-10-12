@@ -26,9 +26,10 @@ Examples:
 
 Dependencies:
   yt-dlp, mpv
-  Optional: ueberzugpp (thumbnails), Firefox (live chat), wl-clipboard (copy URL)
+  Optional: ueberzugpp (thumbnails), Firefox (live chat), wl-clipboard (copy URL),
+    wmctrl (workspace placement on X11)
 
-Config: ~/.config/ytwatch/config.toml (mpv/chat sway workspaces, mpv args)
+Config: ~/.config/ytwatch/config.toml (mpv/chat workspaces, mpv args)
 
 Inside ytwatch, press ? for keyboard help.`
 
