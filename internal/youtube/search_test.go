@@ -166,3 +166,33 @@ func TestSearchPassesTheLocaleToYtDlpAndTheShortsPage(t *testing.T) {
 		t.Errorf("the Shorts page was asked for with %q and Accept-Language %q", pageURL, accept)
 	}
 }
+
+// Two results from different sources must never share a rank, or the order
+// would depend on which query finishes first.
+func TestRanksOfDifferentSourcesNeverTie(t *testing.T) {
+	seen := map[int]string{}
+	add := func(rank int, source string) {
+		if other, found := seen[rank]; found {
+			t.Errorf("rank %d is used by %s and by %s", rank, other, source)
+		}
+		seen[rank] = source
+	}
+	for p := 0; p < videoResultCount; p++ {
+		add(mainRanking.at(p), "main")
+	}
+	for p := 0; p < playlistCount; p++ {
+		add(playlistRanking.at(p), "playlist")
+	}
+	for p := 0; p < liveResultCount; p++ {
+		add(liveRanking.at(p), "live")
+	}
+	// A search can have Shorts that match the query and Shorts that do not,
+	// so both kinds count.
+	matching, other := shortRanking("a"), shortRanking("zzz")
+	for p := 0; p < shortResultCount; p++ {
+		add(matching(p, "a b"), "matching Short")
+	}
+	for p := 0; p < shortResultCount; p++ {
+		add(other(p, "unrelated"), "other Short")
+	}
+}

@@ -67,12 +67,26 @@ func (f *Filters) Set(row, option int) {
 	}
 }
 
+// Applied returns the filters YouTube can apply. It has no upload date filter
+// for Shorts: a search for Shorts with a date finds nothing, so the date is
+// left out.
+func (f Filters) Applied() Filters {
+	if f.Type == TypeShorts {
+		f.Date = 0
+	}
+	return f
+}
+
+// DateIgnored reports whether the upload date is set but has no effect.
+func (f Filters) DateIgnored() bool { return f.Type == TypeShorts }
+
 // Active reports whether any filter differs from the default.
 func (f Filters) Active() bool { return f != Filters{} }
 
 // Summary lists the active filters, such as "Live, This week", or ""
 // when there are none.
 func (f Filters) Summary() string {
+	f = f.Applied()
 	var parts []string
 	for row := range Rows {
 		if option := f.Get(row); option != 0 {
@@ -92,12 +106,13 @@ var (
 
 // Param builds YouTube's "sp" search parameter.
 func (f Filters) Param() string {
+	f = f.Applied()
 	var inner []byte
 	if code := dateCodes[f.Date]; code != 0 {
 		inner = append(inner, 0x08, code) // field 1: upload date
 	}
 	typeCode := typeCodes[f.Type]
-	if typeCode == 0 && f.Duration != 0 || f.Date != 0 {
+	if typeCode == 0 && (f.Duration != 0 || f.Date != 0) {
 		// These filters only apply to videos. Say so, so that channels and
 		// playlists do not mix into the results.
 		typeCode = typeCodes[TypeVideos]

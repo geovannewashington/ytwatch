@@ -219,3 +219,14 @@ func TestParseSearchLocale(t *testing.T) {
 		}
 	}
 }
+
+func TestHistoryLimitsHaveAnUpperBound(t *testing.T) {
+	for _, bad := range []string{"max_age_days = 999999", "max_age_days = 0", "max_entries = 1000000"} {
+		if _, err := Parse("[history]\n" + bad + "\n"); err == nil {
+			t.Errorf("%q should be rejected", bad)
+		}
+	}
+	if _, err := Parse("[history]\nmax_age_days = 36500\nmax_entries = 100000\n"); err != nil {
+		t.Errorf("the largest allowed values were rejected: %v", err)
+	}
+}

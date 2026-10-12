@@ -310,6 +310,9 @@ type resultsState struct {
 	ranks         []int
 	selected, top int
 	title         string
+	// partial is set when the results were still arriving when the playlist
+	// was opened, which stops them.
+	partial bool
 }
 
 // openPlaylist lists the videos of playlist v. Esc returns to the results.
@@ -319,7 +322,7 @@ func (m *Model) openPlaylist(v media.Video) tea.Cmd {
 		m.status = "This playlist has no link"
 		return nil
 	}
-	m.parents = append(m.parents, resultsState{m.items, m.ranks, m.selected, m.top, m.listTitle})
+	m.parents = append(m.parents, resultsState{m.items, m.ranks, m.selected, m.top, m.listTitle, m.searching})
 	m.listTitle = clean(v.Title)
 	loc := m.locale()
 	cmd := m.startStream("Opening playlist... | Esc goes back", func(ctx context.Context, emit func(youtube.Event)) {
@@ -343,6 +346,9 @@ func (m *Model) closePlaylist() tea.Cmd {
 	m.searching, m.searchDone, m.metadataDone, m.searchError = false, true, true, ""
 	m.endVisual()
 	m.status = m.resultsStatus()
+	if last.partial {
+		m.status += " | the search was stopped early, press r to run it again"
+	}
 	return m.scheduleThumbnail()
 }
 
@@ -542,11 +548,17 @@ func (m *Model) insertResult(v media.Video, rank int) []tea.Cmd {
 		m.selected, m.top = 0, 0
 		return []tea.Cmd{m.scheduleThumbnail()}
 	}
+	// The result came in above the anchor of a selection: the rows the
+	// selection covers moved down with it.
+	if m.visual && at <= m.visualAnchor {
+		m.visualAnchor++
+	}
 	if at <= m.selected && m.selected > 0 {
 		m.selected++
-		if m.visual && at <= m.visualAnchor {
-			m.visualAnchor++
+		if at < m.top {
+			m.top++ // the rows in view moved down, keep showing the same ones
 		}
+		m.keepSelectionVisible()
 	} else if at == 0 {
 		// A better first result arrived while the cursor was on the first row.
 		return []tea.Cmd{m.scheduleThumbnail()}
@@ -1336,6 +1348,7 @@ func (m *Model) downloadSelected() tea.Cmd {
 // does not open many connections at once.
 func (m *Model) startDownloads(videos []media.Video) tea.Cmd {
 	var cmds []tea.Cmd
+	var last media.Video
 	ctx, cfg := m.ctx, m.cfg
 	opts := download.Options{AudioOnly: m.audioOnly, Quality: m.quality}
 	for _, v := range videos {
@@ -1344,6 +1357,7 @@ func (m *Model) startDownloads(videos []media.Video) tea.Cmd {
 			continue
 		}
 		m.downloading[v.ID] = v.Title
+		last = v
 		cmds = append(cmds, func() tea.Msg {
 			path, err := download.Run(ctx, v, cfg, opts)
 			return downloadDoneMsg{id: v.ID, title: v.Title, path: path, err: err}
@@ -1353,7 +1367,7 @@ func (m *Model) startDownloads(videos []media.Video) tea.Cmd {
 	case 0:
 		return nil
 	case 1:
-		m.status = "⬇ Downloading | " + clean(videos[len(videos)-1].Title)
+		m.status = "⬇ Downloading | " + clean(last.Title)
 	default:
 		m.status = fmt.Sprintf("⬇ Downloading %d videos, one after the other", len(cmds))
 	}
@@ -1849,7 +1863,11 @@ func (m *Model) renderFilters() string {
 	b.WriteString(panelTitleStyle.Render("SEARCH FILTERS") + "\n\n")
 	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, columns...) + "\n\n")
 	// The help is always one line, so the box keeps its size between columns.
-	b.WriteString(metaStyle.Render(truncate(youtube.Rows[m.filterCol].Help, filterColumnWidth*len(columns))) + "\n")
+	help := youtube.Rows[m.filterCol].Help
+	if m.filterCol == youtube.RowDate && m.filterDraft.DateIgnored() {
+		help = "YouTube has no date filter for Shorts, so it is ignored."
+	}
+	b.WriteString(metaStyle.Render(truncate(help, filterColumnWidth*len(columns))) + "\n")
 	b.WriteString(helpStyle.Render("j/k option | h/l column | Enter search | x reset | Esc cancel"))
 	box := helpBoxStyle.Render(b.String())
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
@@ -2078,23 +2096,34 @@ func tailTruncate(s string, width int) string {
 var _ tea.Model = (*Model)(nil)
 
 // renderInput draws the input line with a block cursor, scrolled sideways so
-// that the cursor stays inside width columns.
+// that the cursor stays inside width columns. The text is made safe to print
+// in parts, so characters that are removed do not move the cursor.
 func renderInput(text string, cursor, width int) string {
-	runes := []rune(sanitize(text))
-	cursor = min(max(cursor, 0), len(runes))
-	start := 0
-	for lipgloss.Width(string(runes[start:cursor]))+1 > width {
-		start++
+	before, under, after := inputParts(text, cursor)
+	for len(before) > 0 && lipgloss.Width(string(before))+1 > width {
+		before = before[1:]
 	}
-	end := len(runes)
-	for end > cursor && lipgloss.Width(string(runes[start:end]))+1 > width {
-		end--
+	room := width - lipgloss.Width(string(before)) - 1
+	for len(after) > 0 && lipgloss.Width(string(after)) > room {
+		after = after[:len(after)-1]
 	}
-	under := " "
-	after := ""
-	if cursor < end {
-		under = string(runes[cursor])
-		after = string(runes[cursor+1 : end])
+	cell := " "
+	if len(under) > 0 {
+		cell = string(under)
 	}
-	return string(runes[start:cursor]) + lipgloss.NewStyle().Reverse(true).Render(under) + after
+	return string(before) + lipgloss.NewStyle().Reverse(true).Render(cell) + string(after)
+}
+
+// inputParts splits the input at the cursor into the text before it, the
+// character under it and the text after it. Each part is made safe to print
+// on its own, so characters that are removed do not move the cursor.
+func inputParts(text string, cursor int) (before, under, after []rune) {
+	all := []rune(text)
+	cursor = min(max(cursor, 0), len(all))
+	before = []rune(sanitize(string(all[:cursor])))
+	if cursor < len(all) {
+		under = []rune(sanitize(string(all[cursor])))
+		after = []rune(sanitize(string(all[cursor+1:])))
+	}
+	return before, under, after
 }

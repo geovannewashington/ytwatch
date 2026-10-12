@@ -57,6 +57,7 @@ func Load(path string, maxAge time.Duration, maxEntries int, now time.Time) *Sto
 	defer file.Close()
 	total := 0
 	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	for scanner.Scan() {
 		total++
 		seconds, query, ok := strings.Cut(scanner.Text(), "\t")
@@ -72,7 +73,9 @@ func Load(path string, maxAge time.Duration, maxEntries int, now time.Time) *Sto
 	}
 	s.entries = dedupe(s.entries)
 	s.trim()
-	if len(s.entries) != total {
+	// If reading stopped early, do not write back a shortened list: that would
+	// delete the lines that were not read.
+	if scanner.Err() == nil && len(s.entries) != total {
 		s.save()
 	}
 	return s

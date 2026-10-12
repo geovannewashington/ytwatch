@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -61,5 +62,23 @@ func TestMissingFileAndEmptyPath(t *testing.T) {
 	s.Add("x", now) // must not panic or write anywhere
 	if len(s.Queries()) != 0 {
 		t.Fatal("an empty path keeps nothing")
+	}
+}
+
+func TestLoadDoesNotShortenTheFileWhenReadingStopsEarly(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "history")
+	line := func(q string) string { return strconv.FormatInt(now.Add(-time.Hour).Unix(), 10) + "\t" + q + "\n" }
+	huge := strings.Repeat("x", 2<<20) // longer than a line may be
+	data := line("before") + line(huge) + line("after")
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := Load(path, 30*24*time.Hour, 100, now)
+	if got := s.Queries(); len(got) != 1 || got[0] != "before" {
+		t.Fatalf("Queries() = %q", got)
+	}
+	saved, _ := os.ReadFile(path)
+	if string(saved) != data {
+		t.Fatal("the file was rewritten, which would delete the lines that were not read")
 	}
 }

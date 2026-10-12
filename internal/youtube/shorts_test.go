@@ -57,16 +57,16 @@ func TestShortRankingPutsMatchingTitlesFirst(t *testing.T) {
 	}
 	// Every query word is in the title: just after the regular result at the
 	// same position.
-	if got := rank(0, "Ranking Funny Cat Moment 😂"); got != mainRanking.at(0)+5 {
+	if got := rank(0, "Ranking Funny Cat Moment 😂"); got != mainRanking.at(0)+shortMatchOffset {
 		t.Errorf("a matching Short at position 0 has rank %d", got)
 	}
 	// Otherwise it joins the group after the first few results, in order.
 	a, b := rank(0, "Something else"), rank(1, "Another one")
-	if a != 55 || b <= a || a < mainRanking.at(5) {
+	if a != shortGroupBase || b <= a || a < mainRanking.at(5) {
 		t.Errorf("group ranks = %d, %d", a, b)
 	}
 	// An empty query matches nothing.
-	if got := shortRanking("")(0, "x"); got != 55 {
+	if got := shortRanking("")(0, "x"); got != shortGroupBase {
 		t.Errorf("empty query rank = %d", got)
 	}
 }

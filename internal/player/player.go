@@ -128,7 +128,8 @@ func Start(videos []media.Video, cfg config.Config, opts Options) (*Process, err
 	if err != nil {
 		return nil, fmt.Errorf("mpv is not installed")
 	}
-	title := strings.ReplaceAll(videos[0].Title, "\n", " ")
+	// mpv expands ${...} in a title, so a literal $ is written as $$.
+	title := strings.ReplaceAll(strings.ReplaceAll(videos[0].Title, "\n", " "), "$", "$$")
 	if len(videos) > 1 {
 		// mpv shows the title of whichever video is playing.
 		title = "${media-title}"

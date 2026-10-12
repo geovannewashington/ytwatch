@@ -80,3 +80,16 @@ func TestStartNeedsAVideo(t *testing.T) {
 		t.Fatal("want an error")
 	}
 }
+
+func TestStartEscapesDollarInTheTitle(t *testing.T) {
+	out := fakeMPV(t)
+	p, err := Start([]media.Video{{ID: "video0001", Title: "Cost: ${media-title} $5"}}, config.Default(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = p.Wait()
+	data, _ := os.ReadFile(out)
+	if !strings.Contains(string(data), "--title=ytwatch | Cost: $${media-title} $$5") {
+		t.Fatalf("mpv would expand the title:\n%s", data)
+	}
+}

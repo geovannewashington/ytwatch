@@ -827,3 +827,95 @@ func TestHelpIsShortAndHasNoDuplicateKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestResultsInsertedAboveAKeepTheSelectionAndTheScrollSteady(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 120, 30
+	for i := 0; i < 20; i++ {
+		id := fmt.Sprintf("video%04d", i)
+		m.items = append(m.items, media.Video{ID: id, Title: id})
+		m.ranks = append(m.ranks, (i+1)*10)
+	}
+	page := m.pageSize()
+	// The cursor is on the last visible row of a scrolled list.
+	m.top, m.selected = 5, 5+page-1
+	want := m.items[m.selected].ID
+	m.insertResult(media.Video{ID: "newtop0001", Title: "new"}, 0)
+	if v, _ := m.selectedVideo(); v.ID != want {
+		t.Fatalf("the selection moved to %s, want %s", v.ID, want)
+	}
+	if m.selected < m.top || m.selected >= m.top+page {
+		t.Fatalf("the cursor left the window: selected %d, top %d, page %d", m.selected, m.top, page)
+	}
+	// The rows in view are the same ones as before.
+	if m.items[m.top].ID != "video0005" && m.items[m.top].ID != "video0006" {
+		t.Fatalf("the window jumped, first row is %s", m.items[m.top].ID)
+	}
+}
+
+func TestAResultBetweenTheCursorAndTheAnchorKeepsTheSelection(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 120, 30
+	for i := 0; i < 8; i++ {
+		id := fmt.Sprintf("video%04d", i)
+		m.items = append(m.items, media.Video{ID: id, Title: id})
+		m.ranks = append(m.ranks, (i+1)*10)
+	}
+	// V on row 6, then up to row 1: the selection is rows 1 to 6.
+	m.visual, m.visualAnchor, m.selected = true, 6, 1
+	m.insertResult(media.Video{ID: "between001", Title: "x"}, 35) // lands at index 3
+	lo, hi := m.selection()
+	if m.items[lo].ID != "video0001" || m.items[hi].ID != "video0006" {
+		t.Fatalf("the selection now spans %s to %s, want video0001 to video0006", m.items[lo].ID, m.items[hi].ID)
+	}
+	// A better first result while the cursor is on row 0 and the anchor lower.
+	m.selected, m.visualAnchor = 0, 4
+	anchorID := m.items[4].ID
+	m.insertResult(media.Video{ID: "first00001", Title: "y"}, 0)
+	if m.items[m.visualAnchor].ID != anchorID {
+		t.Fatalf("the anchor moved to %s, want %s", m.items[m.visualAnchor].ID, anchorID)
+	}
+}
+
+func TestClosingAPlaylistTellsWhenTheSearchWasStoppedEarly(t *testing.T) {
+	m := New("test")
+	m.items = []media.Video{playlistVideo()}
+	m.ranks = []int{0}
+	m.searching = true // results were still arriving
+	m.openPlaylist(playlistVideo())
+	m.closePlaylist()
+	m.cancel()
+	if !strings.Contains(m.status, "stopped early") {
+		t.Fatalf("status = %q", m.status)
+	}
+}
+
+func TestInputCursorStaysWhereTheTextIsWithRemovedCharacters(t *testing.T) {
+	// The emoji is not printed, so the cursor after "a🎉" is after "a".
+	before, under, after := inputParts("a🎉b", 2)
+	if string(before) != "a" || string(under) != "b" || string(after) != "" {
+		t.Fatalf("parts = %q %q %q", string(before), string(under), string(after))
+	}
+	before, under, after = inputParts("go 🎉 lang", 3)
+	if string(before) != "go " || string(under) != "" || string(after) != " lang" {
+		t.Fatalf("parts = %q %q %q", string(before), string(under), string(after))
+	}
+	if got := renderInput("abc", 99, 20); !strings.HasPrefix(got, "abc") {
+		t.Fatalf("a cursor past the end goes to the end: %q", got)
+	}
+}
+
+func TestFilterMenuExplainsThatShortsIgnoreTheDate(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 100, 30
+	m.showFilters = true
+	m.filterDraft = youtube.Filters{Type: youtube.TypeShorts, Date: 2}
+	m.filterCol = youtube.RowDate
+	if out := m.View(); !strings.Contains(out, "no date filter for Shorts") {
+		t.Fatalf("the menu should say why the date does nothing:\n%s", out)
+	}
+	m.filterDraft.Type = youtube.TypeVideos
+	if out := m.View(); strings.Contains(out, "no date filter") {
+		t.Fatal("the note belongs only to Shorts")
+	}
+}

@@ -59,12 +59,14 @@ type ranking struct {
 
 func (r ranking) at(position int) int { return r.base + position*r.step }
 
-// The main query's results are 10 apart, so a playlist (rank 80, then every
-// 40) lands after the 8th result, then after every 4th.
+// The main query's results are 10 apart (0, 10, 20 ...), so a playlist lands
+// after the 8th result, then after every 4th. The other sources use ranks
+// that end in a different digit, so two results never have the same rank and
+// the order does not depend on which query finishes first.
 var (
 	mainRanking     = ranking{base: 0, step: 10}
-	playlistRanking = ranking{base: 80, step: 40}
-	liveRanking     = ranking{base: 360, step: 10, onlyLive: true}
+	playlistRanking = ranking{base: 86, step: 40}
+	liveRanking     = ranking{base: 365, step: 10, onlyLive: true}
 )
 
 var (

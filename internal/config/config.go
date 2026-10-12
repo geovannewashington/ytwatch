@@ -265,9 +265,9 @@ func (c *Config) set(section, key, raw string) error {
 	case "history.enabled":
 		c.History.Enabled, err = strconv.ParseBool(raw)
 	case "history.max_age_days":
-		c.History.MaxAgeDays, err = parsePositiveInt(raw)
+		c.History.MaxAgeDays, err = parseBoundedInt(raw, 36500) // about 100 years
 	case "history.max_entries":
-		c.History.MaxEntries, err = parsePositiveInt(raw)
+		c.History.MaxEntries, err = parseBoundedInt(raw, 100000)
 	case "chat.enabled":
 		c.Chat.Enabled, err = strconv.ParseBool(raw)
 	case "chat.workspace":
@@ -418,11 +418,11 @@ func stripComment(line string) string {
 	return line
 }
 
-// parsePositiveInt parses a whole number of at least 1.
-func parsePositiveInt(raw string) (int, error) {
+// parseBoundedInt parses a whole number from 1 to max.
+func parseBoundedInt(raw string, max int) (int, error) {
 	n, err := strconv.Atoi(raw)
-	if err != nil || n < 1 {
-		return 0, fmt.Errorf("%q is not a whole number of 1 or more", raw)
+	if err != nil || n < 1 || n > max {
+		return 0, fmt.Errorf("%q is not a whole number from 1 to %d", raw, max)
 	}
 	return n, nil
 }

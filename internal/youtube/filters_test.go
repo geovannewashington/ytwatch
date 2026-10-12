@@ -66,3 +66,34 @@ func TestResultsURLEscapesTheQueryAndParam(t *testing.T) {
 		t.Fatalf("got  %q\nwant %q", got, want)
 	}
 }
+
+// A date filter must not override the type: Shorts and playlists keep their
+// own type code.
+func TestParamKeepsTheTypeWithADateOrDuration(t *testing.T) {
+	for name, tc := range map[string]struct {
+		filters Filters
+		want    string
+	}{
+		"Shorts ignore the date": {Filters{Type: TypeShorts, Date: 2}, "EgIQCQ=="},
+		"playlists today":        {Filters{Type: TypePlaylists, Date: 1}, "EgQIAhAD"},
+		"Shorts under 4 min":     {Filters{Type: TypeShorts, Duration: 1}, "EgQQCRgB"},
+		"any type with a date":   {Filters{Date: 2}, "EgQIAxAB"},
+	} {
+		if got := tc.filters.Param(); got != tc.want {
+			t.Errorf("%s: Param() = %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
+func TestShortsIgnoreTheDateEverywhere(t *testing.T) {
+	f := Filters{Type: TypeShorts, Date: 2, Duration: 1}
+	if got := f.Summary(); got != "Shorts, Under 4 minutes" {
+		t.Errorf("Summary() = %q, the ignored date should not show", got)
+	}
+	if !f.DateIgnored() || (Filters{Type: TypeVideos, Date: 2}).DateIgnored() {
+		t.Error("DateIgnored is wrong")
+	}
+	if got := (Filters{Type: TypePlaylists, Date: 2}).Applied().Date; got != 2 {
+		t.Errorf("playlists keep the date, got %d", got)
+	}
+}

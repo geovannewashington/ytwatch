@@ -129,6 +129,13 @@ func text(node map[string]any, path ...string) string {
 	return str(current)
 }
 
+// Ranks of Shorts in a mixed search, chosen so that they never equal the rank
+// of another source (see mainRanking).
+const (
+	shortMatchOffset = 3  // after the regular result at the same position
+	shortGroupBase   = 52 // the group after the first few results
+)
+
 // shortRanking places Shorts in a mixed search. A Short with exactly the title
 // searched for goes first. A Short whose title has every
 // word of the query is as good a match as a regular result, so it goes right
@@ -142,9 +149,9 @@ func shortRanking(query string) func(position int, title string) int {
 			return -1
 		}
 		if len(words) > 0 && containsAll(title, words) {
-			return mainRanking.at(position) + 5
+			return mainRanking.at(position) + shortMatchOffset
 		}
-		return 55 + position*3
+		return shortGroupBase + position*3
 	}
 }
 
