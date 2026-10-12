@@ -1,5 +1,12 @@
 <div align="center">
 
+<pre>
+  ╲ ╱  
+╭─────╮
+│ • • │
+╰──◡──╯
+</pre>
+
 # ytwatch
 
 **Search YouTube from the terminal and play it in mpv.**
@@ -20,9 +27,11 @@ API key.
 ## Features
 
 - Results stream in as they are found, with channel, length, views, age,
-  description and thumbnail.
-- Badges for live streams, Shorts, recorded streams and playlists.
+  description (with its line breaks) and thumbnail.
+- Videos, Shorts, live streams and playlists in one search, with badges.
+- Open a playlist to browse its videos.
 - Search filters like youtube.com: type, duration, upload date.
+- Set the search language and region.
 - Select several results with `V` and play them as a queue or download them.
 - Pick the video quality, or play audio only.
 - Search history on Up and Down, deleted automatically after 30 days.
@@ -81,7 +90,8 @@ of keys.
 | Key | Action |
 |---|---|
 | `j` `k`, `h` `l` | Move through results, switch between results and preview |
-| `Enter` | Play in mpv |
+| `Enter` | Play in mpv. On a playlist, open it. |
+| `Esc` | Go back from a playlist |
 | `/` | Edit the search. `Up` and `Down` walk through past searches |
 | `r` | Repeat the search |
 | `f` | Filters: type, duration, upload date |
@@ -127,6 +137,10 @@ accent = "#88c0d0"           # any role can be overridden
 [preview]
 output = "auto"              # auto, off, x11, wayland, sixel, kitty, iterm2, chafa
 
+[search]
+language = "pt-BR"           # code like pt, ja or pt-BR; empty: YouTube decides
+region = "BR"                # two-letter country code
+
 [history]
 enabled = true
 max_age_days = 30
@@ -151,6 +165,11 @@ ytwatch shows why mpv failed in the status line. Run `ytwatch doctor` first.
   where you are logged in to YouTube. It is off by default because it reads
   that browser's cookies.
 - **HTTP 403.** YouTube refused the stream. Try again, or update `yt-dlp`.
+- **Results differ from what I see on youtube.com.** YouTube personalizes
+  results for logged-in accounts and picks the language and country from
+  your connection. ytwatch is not logged in. Set `language` and `region`
+  under `[search]` to get closer. The region is sent as a fake address from
+  that country, which YouTube may ignore.
 - **No thumbnails.** Install `ueberzugpp`. If your terminal runs under another
   display server than your session (for example an X11 terminal inside
   Wayland), set `[preview] output` to `x11` or `wayland`.
