@@ -1,160 +1,181 @@
+<div align="center">
+
 # ytwatch
 
-A local-first YouTube search TUI written in Go with Bubble Tea and Lip Gloss. It complements Newsraft: Newsraft is for following feeds and saving uploads; ytwatch is for searching a topic, inspecting results, and starting playback in mpv.
+**Search YouTube from the terminal and play it in mpv.**
+
+[![Go](https://img.shields.io/badge/go-1.23+-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-linux-lightgrey)](#install)
+
+![ytwatch](docs/screenshot.png)
+
+</div>
+
+ytwatch is a small terminal interface for finding videos. It searches with
+[yt-dlp](https://github.com/yt-dlp/yt-dlp), shows thumbnails and descriptions
+next to the results, and plays with [mpv](https://mpv.io). No account and no
+API key.
 
 ## Features
 
-- Progressive YouTube search using `yt-dlp`; results appear before all metadata checks finish.
-- Up to 55 unique results across a regular relevance search and a separate live-oriented search (results are streamed into the UI as they arrive).
-- Result details: channel, duration, views, relative upload time, description, and thumbnail.
-- Background metadata resolution helps distinguish current livestreams, upcoming streams, recorded livestreams, and Shorts.
-- Live streams launch in `mpv` and open YouTube's pop-out chat in Firefox.
-- Optional config file for mpv/chat sway workspaces, mpv arguments and the chat browser.
-- Optional Ueberzug++ thumbnail overlay with an on-disk cache.
-- Keyboard controls include Vim-style motions and numeric prefixes. `h/l` changes pane focus; `j/k` moves through results or scrolls the preview depending on focus.
-- No YouTube API key or account credentials.
+- Results stream in as they are found, with channel, length, views, age,
+  description and thumbnail.
+- Badges for live streams, Shorts, recorded streams and playlists.
+- Search filters like youtube.com: type, duration, upload date.
+- Select several results with `V` and play them as a queue or download them.
+- Pick the video quality, or play audio only.
+- Search history on Up and Down, deleted automatically after 30 days.
+- Open the video or a numbered description link in your browser, or in a
+  program you choose (for example images in `nsxiv`).
+- Live streams open their chat in your browser.
+- Moves the mpv window to a workspace you choose on sway, i3, Hyprland, niri,
+  bspwm and X11 window managers.
+- Color themes, and every color can be changed.
 
-## Dependencies
+## Install
 
-Required:
+You need `yt-dlp`, `mpv` and Go 1.23 or newer. On Arch Linux:
 
-- Go 1.23+
-- `yt-dlp`
-- `mpv`
-
-Optional:
-
-- `ueberzugpp` for image thumbnails (Wayland/Sway output)
-- Firefox for live-chat pop-outs
-- `wl-clipboard` for copying a selected video URL with `y`
-- A browser logged in to YouTube (Firefox, Chromium, ...). It fixes the most common playback error, see [If a video won't play](#if-a-video-wont-play)
-
-Keep `yt-dlp` up to date. YouTube changes often and old versions stop working.
-
-## Install (step by step)
-
-You do not need to know Go. You only need to run these commands in a terminal.
-
-**1. Install the tools ytwatch needs.** On Arch Linux:
-
-```bash
+```sh
 sudo pacman -S go yt-dlp mpv
 ```
 
-On other systems, install `go`, `yt-dlp` and `mpv` with your package manager.
+Then build and install:
 
-**2. Download the project.**
-
-```bash
+```sh
 git clone https://github.com/geovannewashington/ytwatch.git
 cd ytwatch
+make install    # builds and copies ytwatch to ~/.local/bin
 ```
 
-**3. Build it.** This creates a single file named `ytwatch`.
+Make sure `~/.local/bin` is in your `PATH`. Without `make`, run
+`go build -o ytwatch ./cmd/ytwatch` and copy the file where you like.
 
-```bash
-go build -o ytwatch ./cmd/ytwatch
-```
+Keep `yt-dlp` up to date, because YouTube changes often. On Debian and Ubuntu
+the packaged version is usually too old: use `pipx install yt-dlp` instead.
 
-**4. Put it in a folder that is in your `PATH`.** `~/.local/bin` is a common choice.
+Optional programs:
 
-```bash
-install -Dm755 ytwatch ~/.local/bin/ytwatch
-```
+| Program | For |
+|---|---|
+| `ueberzugpp` | Thumbnails. Works on Wayland and X11, and in terminals with a graphics protocol |
+| `ffmpeg` | Joining video and audio in downloads |
+| `wl-clipboard`, `xclip` or `xsel` | Copying links with `y` |
+| `wmctrl` | Moving windows to a workspace on X11 |
 
-**5. Run it.**
-
-```bash
-ytwatch
-```
-
-If you see `command not found`, add `~/.local/bin` to your `PATH` (for example in `~/.zshrc` or `~/.bashrc`):
-
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-```
-
-Optional: run the tests with `go test ./...`. Go downloads the libraries ytwatch uses automatically on the first build.
-
-Shortcut: steps 3 and 4 in one command (needs `make`):
-
-```bash
-make install
-```
-
-Another option: `go install ./cmd/ytwatch` builds and installs into `$(go env GOPATH)/bin` (usually `~/go/bin`), which must also be in your `PATH`.
+ytwatch is made for Linux. Run `ytwatch doctor` to see what is installed and
+what your session supports.
 
 ## Usage
 
-```bash
-ytwatch
+```sh
+ytwatch                 # opens with the search line active
 ytwatch "Go interfaces"
-ytwatch "live coding Go"
-ytwatch --help
+ytwatch doctor
 ```
 
-Running without a query opens the interface with the search input active. Use `/` at any time to search again.
-
-mpv keeps playing when you quit ytwatch.
-
-## Keyboard
+mpv keeps playing when you quit ytwatch. Press `?` inside for the full list
+of keys.
 
 | Key | Action |
 |---|---|
-| `j` / `k`, arrows | Move one result |
-| `5j`, `3k` | Move by a count |
-| `gg` | First result |
-| `G` | Last result |
-| `H` / `M` / `L` | Top / middle / bottom of the visible list |
-| `Ctrl+d` / `Ctrl+u` | Half-page down / up |
-| `Ctrl+f` / `Ctrl+b` | Full-page down / up |
-| `PageDown` / `PageUp` | Move one page |
-| `/` | Search; Enter submits, Esc cancels |
-| `r` | Repeat the current search |
-| `Enter` | Play selected result in mpv |
-| `y` | Copy selected URL with `wl-copy` |
-| `?` | Keyboard help |
+| `j` `k`, `h` `l` | Move through results, switch between results and preview |
+| `Enter` | Play in mpv |
+| `/` | Edit the search. `Up` and `Down` walk through past searches |
+| `r` | Repeat the search |
+| `f` | Filters: type, duration, upload date |
+| `V` | Select lines, then `Enter` plays them as a queue and `d` downloads them |
+| `d` | Download. Files go to `~/Downloads/ytwatch` |
+| `a` | Audio only |
+| `Q` | Video quality: best, 1080p, 720p, 480p, 360p |
+| `o` `y` | Open or copy the video link. With a number, such as `3o`, the 3rd description link |
+| `t` | Next color theme |
+| `gg` `G` `5j` `Ctrl+d` | Vim-style movement and counts |
 | `q` | Quit |
-
-Regular videos have no type prefix. Shorts have an explicit `⚡ SHORT` badge, upcoming and active streams have their own badges, and archived livestreams are marked `📼 LIVE VOD` after the title.
-
-## Metadata and livestream detection
-
-The search phase runs a normal relevance query and a second query with `live` appended, each using `yt-dlp` flat search results to keep the interface responsive. Up to 35 regular and 20 live-oriented results are deduplicated into one list. Four bounded workers then resolve richer metadata in the background. You may see some badges update shortly after results arrive. `yt-dlp`'s `live_status` and `is_live` fields distinguish current streams from upcoming and previously-live broadcasts. Shorts are only marked when their URL/media type says Shorts or the metadata identifies a portrait video of three minutes or less; duration alone is not enough to reliably identify a Short.
-
-A video that could not be fully resolved may remain without a status badge. It can still be selected for playback.
-
-## Thumbnails
-
-Thumbnail images are downloaded asynchronously and cached beneath `${XDG_CACHE_HOME:-~/.cache}/ytwatch/thumbnails`. Ueberzug++ is optional. When it is installed, ytwatch reserves a stable preview area and updates the overlay when the selection changes or the terminal is resized. Disable/uninstall Ueberzug++ to run the TUI without images.
 
 ## Configuration
 
-Optional. Create `${XDG_CONFIG_HOME:-~/.config}/ytwatch/config.toml`:
+Everything is optional. The file is `~/.config/ytwatch/config.toml`
+(`$XDG_CONFIG_HOME` is respected). A mistake stops ytwatch at start with an
+error that names the line.
 
 ```toml
+[general]
+browser = "firefox"          # for o and live chat; default: your desktop's browser
+audio_only = false
+quality = "best"             # best, 1080p, 720p, 480p, 360p
+
 [mpv]
-workspace = "3"                  # sway workspace for mpv windows (omit to leave placement to sway)
-args = ["--volume=60"]           # extra mpv arguments
-cookies_from_browser = "firefox" # browser whose YouTube login yt-dlp reuses (see below)
+workspace = "3"              # where mpv windows go; the syntax is your WM's own
+args = ["--volume=60"]
+cookies_from_browser = "firefox"   # see Troubleshooting
 
 [chat]
-enabled = true                   # open YouTube's chat pop-out for live streams
-workspace = "4"                  # sway workspace for the chat window
-browser = "firefox"              # command used to open the chat
+enabled = true
+workspace = "4"
+
+[download]
+dir = "~/Videos/youtube"
+args = ["--embed-metadata"]  # extra yt-dlp arguments
+
+[theme]
+name = "everforest"          # catppuccin, gruvbox, nord, tokyonight,
+                             # rose-pine, dracula, terminal
+accent = "#88c0d0"           # any role can be overridden
+
+[preview]
+output = "auto"              # auto, off, x11, wayland, sixel, kitty, iterm2, chafa
+
+[history]
+enabled = true
+max_age_days = 30
+max_entries = 100
+
+# Open description links with a program. The command runs without a shell,
+# and %l is the link. Links without a match open in the browser.
+[link.images]
+match = '\.(png|jpe?g|gif|webp)(\?.*)?$'
+command = ["nsxiv", "%l"]
 ```
 
-Workspace placement needs sway (`swaymsg`). ytwatch waits for the new window to appear and moves it, so the window may flash on the current workspace for a moment. Unknown keys or invalid values stop ytwatch at startup with an error naming the line.
+Workspace values: sway, i3 and niri take a name or number; Hyprland takes `3`
+or `name:video`; bspwm a desktop name or `^2`; `wmctrl` a number from 1.
 
-## If a video won't play
+## Troubleshooting
 
-ytwatch shows why mpv failed in the status bar: `mpv exited with code N | reason`.
+ytwatch shows why mpv failed in the status line. Run `ytwatch doctor` first.
 
-- **"Sign in to confirm you're not a bot" or HTTP 429:** YouTube is rate-limiting anonymous requests. Set `cookies_from_browser = "firefox"` (or your browser) under `[mpv]` in the config. yt-dlp then reuses that browser's YouTube login. You must be logged in to YouTube there. It is off by default because it reads your browser's cookie store.
-- **HTTP 403:** YouTube refused the video stream. Try again, or update yt-dlp.
-- **Anything else:** update `yt-dlp` and `mpv`, then test the URL in a terminal with `mpv "<video url>"` to see the full error.
+- **"Sign in to confirm you're not a bot", or HTTP 429.** YouTube is limiting
+  anonymous requests. Set `cookies_from_browser` under `[mpv]` to a browser
+  where you are logged in to YouTube. It is off by default because it reads
+  that browser's cookies.
+- **HTTP 403.** YouTube refused the stream. Try again, or update `yt-dlp`.
+- **No thumbnails.** Install `ueberzugpp`. If your terminal runs under another
+  display server than your session (for example an X11 terminal inside
+  Wayland), set `[preview] output` to `x11` or `wayland`.
+- **Anything else.** Update `yt-dlp` and `mpv`, then try
+  `mpv "<video url>"` to see the full error.
 
-## Data locations
+## Files
 
-- Thumbnail cache: `${XDG_CACHE_HOME:-~/.cache}/ytwatch/thumbnails`
-- Playback itself is delegated to mpv; ytwatch doesn't store subscriptions, favorites, or a watch-later queue. Keep those in Newsraft as intended.
+| What | Where |
+|---|---|
+| Config | `~/.config/ytwatch/config.toml` |
+| Thumbnail cache | `~/.cache/ytwatch/thumbnails` |
+| Search history | `~/.local/state/ytwatch/history` |
+
+ytwatch stores no subscriptions or watch list. For feeds, a reader such as
+[Newsraft](https://codeberg.org/newsraft/newsraft) pairs well with it.
+
+## Development
+
+```sh
+make test    # go test ./...
+make vet
+make fmt
+```
+
+## License
+
+[MIT](LICENSE)
