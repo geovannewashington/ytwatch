@@ -32,17 +32,26 @@ func userCacheDir() string {
 	return filepath.Join(home, ".cache")
 }
 
+// validFileID reports whether id is safe to use as a cache file name. The limit
+// is high enough for playlist ids, which are about 34 characters.
+func validFileID(id string) bool {
+	if len(id) < 6 || len(id) > 64 {
+		return false
+	}
+	for _, r := range id {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-') {
+			return false
+		}
+	}
+	return true
+}
+
 func Download(ctx context.Context, v media.Video) (string, error) {
 	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
 		return "", err
 	}
-	if len(v.ID) < 6 || len(v.ID) > 20 {
+	if !validFileID(v.ID) {
 		return "", errors.New("invalid video ID")
-	}
-	for _, r := range v.ID {
-		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-') {
-			return "", errors.New("invalid video ID")
-		}
 	}
 	thumbURL := v.ThumbnailURL()
 	parsed, err := url.Parse(thumbURL)

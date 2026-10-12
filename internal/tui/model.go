@@ -400,7 +400,7 @@ func (m *Model) handleSearchEvent(event youtube.Event) []tea.Cmd {
 		if _, isPlaying := m.playing[event.Video.ID]; isPlaying && event.Video.IsCurrentlyLive() && !m.chatOpened[event.Video.ID] {
 			if err := player.OpenYouTubeChat(event.Video, m.cfg); err == nil {
 				m.chatOpened[event.Video.ID] = true
-				m.status = "📡 Live stream | opened YouTube chat"
+				m.status = "Live stream | opened YouTube chat"
 			}
 		}
 		if m.selectedID() == event.Video.ID && m.thumbnailPaths[event.Video.ID] == "" && m.thumbLoadingID != event.Video.ID {
@@ -794,7 +794,7 @@ func (m *Model) previewMaxScroll() int {
 	_, width := m.paneWidths()
 	// PREVIEW, thumbnail rows, blank, title, channel, stats, blank, DESCRIPTION.
 	baseLines := m.thumbRows() + 7
-	if section, _ := m.streamSection(v); len(section) > 0 {
+	if section, _ := m.streamSection(v, width); len(section) > 0 {
 		baseLines += 1 + len(section) // blank separator + section lines
 	}
 	visible := max(1, m.bodyHeight()-baseLines)
@@ -890,9 +890,9 @@ func (m *Model) playSelected() tea.Cmd {
 	if v.IsCurrentlyLive() {
 		if err := player.OpenYouTubeChat(v, m.cfg); err == nil {
 			m.chatOpened[v.ID] = true
-			m.status = "📡 Live stream | opened chat"
+			m.status = "Live stream | opened chat"
 		} else {
-			m.status = "📡 Live stream | " + err.Error()
+			m.status = "Live stream | " + err.Error()
 		}
 	}
 	cmds := []tea.Cmd{waitForPlayer(cmd, v.ID)}
@@ -911,6 +911,10 @@ func (m *Model) downloadSelected() tea.Cmd {
 	}
 	if _, exists := m.downloading[v.ID]; exists {
 		m.status = "Already downloading: " + clean(v.Title)
+		return nil
+	}
+	if v.IsPlaylist() {
+		m.status = "Playlists cannot be downloaded yet"
 		return nil
 	}
 	if v.IsCurrentlyLive() || v.IsUpcoming() {
@@ -1030,15 +1034,23 @@ func (m *Model) renderResultLines(width, height int) string {
 		if _, isPlaying := m.playing[v.ID]; isPlaying {
 			marker = equalizer(m.spinnerFrame, 1) + " "
 		}
-		title := padToWidth(truncate(clean(v.Title), max(1, leftWidth-2)), leftWidth-2)
-		line := marker + titleStyle.Render(title)
+		titleWidth := leftWidth - 2
+		prefix := ""
+		if v.IsPlaylist() {
+			prefix = playlistBadgeStyle.Render(playlistMark + " ")
+			titleWidth -= 2
+		}
+		title := padToWidth(truncate(clean(v.Title), max(1, titleWidth)), titleWidth)
+		line := marker + prefix + titleStyle.Render(title)
 		if badge != "" {
 			line += " " + badge
 		}
 		lines = append(lines, line)
 
 		meta := clean(v.ChannelName()) + " | " + v.DurationText()
-		if v.IsCurrentlyLive() {
+		if v.IsPlaylist() {
+			meta = strings.Join(append([]string{clean(v.ChannelName()), "playlist"}, playlistFacts(v)...), " | ")
+		} else if v.IsCurrentlyLive() {
 			meta = clean(v.ChannelName()) + " | streaming now"
 			if v.ConcurrentViewers > 0 {
 				meta += " | " + v.ViewsText()
@@ -1047,7 +1059,7 @@ func (m *Model) renderResultLines(width, height int) string {
 			meta += " | " + v.ViewsText()
 		}
 		age := v.AgeText(time.Now())
-		if age != "date n/a" {
+		if age != "date n/a" && !v.IsPlaylist() {
 			meta += " | " + age
 		}
 		meta = truncate(meta, width-2)
@@ -1082,10 +1094,10 @@ func (m *Model) renderResultLines(width, height int) string {
 // streamSection describes the stream state of a video in the preview. The
 // first line uses the returned style, the rest are secondary text. Ordinary
 // videos and Shorts have no section.
-func (m *Model) streamSection(v media.Video) ([]string, lipgloss.Style) {
+func (m *Model) streamSection(v media.Video, width int) ([]string, lipgloss.Style) {
 	switch v.Kind() {
 	case media.KindLive:
-		head := "📡 LIVE NOW"
+		head := "LIVE NOW"
 		if v.ConcurrentViewers > 0 {
 			head += "  " + v.ViewsText()
 		}
@@ -1098,8 +1110,42 @@ func (m *Model) streamSection(v media.Video) ([]string, lipgloss.Style) {
 		return []string{"⏳ UPCOMING  " + v.StartText(time.Now()), "Not live yet; playback works once it starts"}, upcomingBadgeStyle
 	case media.KindPastLive:
 		return []string{"📼 LIVE VOD", "Recording of a past livestream"}, pastLiveBadgeStyle
+	case media.KindPlaylist:
+		lines := []string{playlistMark + " PLAYLIST"}
+		for _, entry := range v.Entries[:min(len(v.Entries), 3)] {
+			lines = append(lines, entryLine(entry, width))
+		}
+		if len(v.Entries) == 0 && !m.metadataDone {
+			lines = append(lines, "Loading videos...")
+		}
+		return append(lines, "Enter plays the full playlist"), playlistBadgeStyle
 	}
 	return nil, metaStyle
+}
+
+// playlistFacts lists what is known about a playlist: its size and when it
+// last changed. Both are empty until the detail lookup finishes.
+func playlistFacts(v media.Video) []string {
+	var facts []string
+	if count := v.PlaylistCountText(); count != "" {
+		facts = append(facts, count)
+	}
+	if updated := v.UpdatedText(time.Now()); updated != "" {
+		facts = append(facts, updated)
+	}
+	return facts
+}
+
+// entryLine is one video of a playlist as "title · 3:06", cutting the title
+// so the duration stays visible.
+func entryLine(e media.PlaylistEntry, width int) string {
+	title := clean(e.Title)
+	duration := e.DurationText()
+	if duration == "" {
+		return truncate(title, width)
+	}
+	suffix := " · " + duration
+	return truncate(title, max(1, width-lipgloss.Width(suffix))) + suffix
 }
 
 func (m *Model) renderPreview(width, height int) string {
@@ -1135,8 +1181,14 @@ func (m *Model) renderPreview(width, height int) string {
 		if v.IsShort() {
 			stats = append(stats, "⚡ YouTube Short")
 		}
+		if v.IsPlaylist() {
+			stats = playlistFacts(v)
+			if len(stats) == 0 {
+				stats = []string{"playlist"}
+			}
+		}
 		lines = append(lines, metaStyle.Render(truncate(strings.Join(stats, " | "), width)))
-		if section, style := m.streamSection(v); len(section) > 0 {
+		if section, style := m.streamSection(v, width); len(section) > 0 {
 			lines = append(lines, "")
 			for i, line := range section {
 				if i == 0 {
@@ -1205,10 +1257,8 @@ func (m *Model) renderHelp() string {
 		{"5j / 3k", "Move several results"},
 		{"gg / G, 0 / $", "First / last result"},
 		{"H / M / L", "Top / middle / bottom of visible list"},
-		{"Ctrl+d / Ctrl+u", "Half-page down / up"},
-		{"Ctrl+f / Ctrl+b", "Full-page down / up"},
-		{"h / l, < / >", "Focus results / preview"},
-		{"Tab", "Toggle pane focus"},
+		{"Ctrl+d/u, Ctrl+f/b", "Half-page / full-page down / up"},
+		{"h / l, Tab", "Focus results / preview (Tab toggles)"},
 		{"/", "Search (Enter runs, Esc cancels)"},
 		{"r", "Repeat current search"},
 		{"Enter", "Play selected result in mpv"},
@@ -1218,31 +1268,60 @@ func (m *Model) renderHelp() string {
 		{"? / Esc", "Close this help"},
 		{"q", "Quit"},
 	}
-	var b strings.Builder
-	b.WriteString(panelTitleStyle.Render("KEYBOARD") + "\n\n")
-	for _, row := range rows {
-		b.WriteString("  " + searchStyle.Render(padToWidth(row[0], 18)) + helpStyle.Render(row[1]) + "\n")
+	notes := []string{
+		"Search includes regular videos and a live-oriented query.",
+		"Current livestreams open YouTube chat in your browser.",
+		"Shorts are marked [SHORT]; ordinary videos have no type label.",
+		"Playlists are marked PLAYLIST; Enter plays all their videos.",
 	}
-	b.WriteString("\n")
-	b.WriteString(strings.Join([]string{
-		helpStyle.Render("  Search includes regular videos and a live-oriented query."),
-		helpStyle.Render("  Current livestreams open YouTube chat in your browser."),
-		helpStyle.Render("  Shorts are marked [SHORT]; ordinary videos have no type label."),
-	}, "\n"))
-	box := helpBoxStyle.Width(min(78, m.width-4)).Render(b.String())
+	// Try the roomiest layout first and drop notes, padding and the blank
+	// line under the title until the box fits the terminal height.
+	layouts := []struct {
+		notes, titleGap bool
+		pad             int
+	}{{true, true, 1}, {false, true, 1}, {false, true, 0}, {false, false, 0}}
+	var box string
+	for _, layout := range layouts {
+		var b strings.Builder
+		b.WriteString(panelTitleStyle.Render("KEYBOARD") + "\n")
+		if layout.titleGap {
+			b.WriteString("\n")
+		}
+		for i, row := range rows {
+			b.WriteString("  " + searchStyle.Render(padToWidth(row[0], 20)) + helpStyle.Render(row[1]))
+			if i < len(rows)-1 {
+				b.WriteString("\n")
+			}
+		}
+		if layout.notes {
+			b.WriteString("\n\n")
+			for i, note := range notes {
+				b.WriteString(helpStyle.Render("  " + note))
+				if i < len(notes)-1 {
+					b.WriteString("\n")
+				}
+			}
+		}
+		box = helpBoxStyle.Padding(layout.pad, 2).Width(min(78, m.width-4)).Render(b.String())
+		if lipgloss.Height(box) <= m.height {
+			break
+		}
+	}
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 
 func badgeInfo(v media.Video) (string, lipgloss.Style) {
 	switch v.Kind() {
 	case media.KindLive:
-		return "📡 LIVE", liveBadgeStyle
+		return "LIVE", liveBadgeStyle
 	case media.KindUpcoming:
 		return "⏳ UPCOMING", upcomingBadgeStyle
 	case media.KindPastLive:
 		return "📼 LIVE VOD", pastLiveBadgeStyle
 	case media.KindShort:
 		return "⚡ SHORT", shortBadgeStyle
+	case media.KindPlaylist:
+		return "PLAYLIST", playlistBadgeStyle
 	default:
 		return "", metaStyle
 	}

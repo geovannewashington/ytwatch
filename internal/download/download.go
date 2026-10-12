@@ -56,6 +56,9 @@ func buildArgs(url, dir string, cfg config.Config, audioOnly bool) []string {
 // Run downloads v and returns the path of the saved file. It blocks until
 // yt-dlp ends, and stops it when ctx is cancelled.
 func Run(ctx context.Context, v media.Video, cfg config.Config, audioOnly bool) (string, error) {
+	if v.IsPlaylist() {
+		return "", errors.New("playlists cannot be downloaded yet")
+	}
 	if v.IsCurrentlyLive() || v.IsUpcoming() {
 		return "", errors.New("live and upcoming streams cannot be downloaded")
 	}

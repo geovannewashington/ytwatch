@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -151,5 +152,85 @@ func TestDownloadRefusesLiveAndDuplicates(t *testing.T) {
 	}
 	if cmd := m.handleKey(runeKey('d')); cmd != nil {
 		t.Fatal("same video must not download twice at once")
+	}
+}
+
+func TestHelpFitsTheTerminal(t *testing.T) {
+	for _, size := range [][2]int{{80, 18}, {80, 24}, {100, 30}, {150, 40}} {
+		m := New("test")
+		m.width, m.height = size[0], size[1]
+		m.showHelp = true
+		out := m.View()
+		lines := strings.Split(out, "\n")
+		if len(lines) != size[1] {
+			t.Errorf("%v: help is %d lines tall, want %d", size, len(lines), size[1])
+		}
+		for i, line := range lines {
+			if w := lipgloss.Width(line); w > size[0] {
+				t.Errorf("%v: help line %d is %d wide", size, i, w)
+			}
+		}
+		for _, want := range []string{"KEYBOARD", "Quit"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%v: help is missing %q (cut off)", size, want)
+			}
+		}
+	}
+}
+
+func TestRowsFitWithWideCharactersAndPlaylists(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 120, 30
+	m.items = []media.Video{
+		{ID: "PLpCqPSEm2Xe8sEY2haMDUVgwbkIs5NCJI", Title: "A playlist with a very long title that has to be cut to fit the pane",
+			URL: "https://www.youtube.com/playlist?list=PLpCqPSEm2Xe8sEY2haMDUVgwbkIs5NCJI"},
+		{ID: "video0001", Title: "日本語のチュートリアル：ゴーを学ぶための完全ガイド日本語のチュートリアル", Duration: 60},
+		{ID: "video0002", Title: "Emoji 🎉 title 👨‍👩‍👧‍👦 that is long enough to be cut off at the edge", Duration: 60},
+	}
+	const width = 40
+	for i, row := range strings.Split(m.renderResultLines(width, 12), "\n") {
+		if w := lipgloss.Width(row); w > width {
+			t.Errorf("row %d is %d wide, want at most %d: %q", i, w, width, row)
+		}
+	}
+}
+
+func TestPlaylistRowAndPreviewShowYouTubeStyleDetails(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 140, 40
+	today := time.Now().UTC().Format("20060102")
+	m.items = []media.Video{{
+		ID: "PLpCqPSEm2Xe8sEY2haMDUVgwbkIs5NCJI", Title: "Songs 2026", Channel: "Chillax",
+		URL:           "https://www.youtube.com/playlist?list=PLpCqPSEm2Xe8sEY2haMDUVgwbkIs5NCJI",
+		PlaylistCount: 110, ModifiedDate: today, Description: "A curated playlist of the best songs.",
+		Entries: []media.PlaylistEntry{
+			{Title: "Alex Warren - Ordinary (Lyrics)", Duration: 186},
+			{Title: "Taylor Swift - Opalite (Lyrics)", Duration: 237},
+		},
+	}}
+	m.metadataDone = true
+
+	row := m.renderResultLines(80, 6)
+	for _, want := range []string{"Chillax", "playlist", "110 videos", "updated today", "PLAYLIST"} {
+		if !strings.Contains(row, want) {
+			t.Errorf("row is missing %q:\n%s", want, row)
+		}
+	}
+	for _, unwanted := range []string{"views", "ago"} {
+		if strings.Contains(row, unwanted) {
+			t.Errorf("row should not show %q:\n%s", unwanted, row)
+		}
+	}
+
+	preview := m.renderPreview(70, 30)
+	for _, want := range []string{
+		"110 videos | updated today",
+		"Alex Warren - Ordinary (Lyrics) · 3:06",
+		"Taylor Swift - Opalite (Lyrics) · 3:57",
+		"DESCRIPTION", "A curated playlist of the best songs.",
+	} {
+		if !strings.Contains(preview, want) {
+			t.Errorf("preview is missing %q:\n%s", want, preview)
+		}
 	}
 }

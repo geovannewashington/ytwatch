@@ -72,3 +72,11 @@ esac
 		t.Fatalf("unexpected live result title: %q", live.Title)
 	}
 }
+
+func TestPlaylistSearchURL(t *testing.T) {
+	got := playlistSearchURL("go tutorial & more")
+	want := "https://www.youtube.com/results?search_query=go+tutorial+%26+more&sp=EgIQAw%253D%253D"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}

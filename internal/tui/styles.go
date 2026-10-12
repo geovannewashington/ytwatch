@@ -35,6 +35,7 @@ var (
 	shortBadgeStyle    = lipgloss.NewStyle().Foreground(yellow).Bold(true)
 	upcomingBadgeStyle = lipgloss.NewStyle().Foreground(aqua).Bold(true)
 	pastLiveBadgeStyle = lipgloss.NewStyle().Foreground(orange).Bold(true)
+	playlistBadgeStyle = lipgloss.NewStyle().Foreground(green).Bold(true)
 	playingStyle       = lipgloss.NewStyle().Foreground(green).Bold(true)
 	panelStyle         = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(borderGrey).Padding(0, 1)
 	activePanelStyle   = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(green).Padding(0, 1)
@@ -54,3 +55,9 @@ func equalizer(frame, n int) string {
 	}
 	return playingStyle.Render(b.String())
 }
+
+// playlistMark precedes playlist titles. Pick symbols that every terminal and
+// multiplexer measures as one cell: tmux counts U+2630 (☰) as two cells while
+// the width libraries count one, which shifted those rows and corrupted the
+// screen.
+const playlistMark = "≡"

@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,6 +26,7 @@ const (
 
 	videoResultCount = 35
 	liveResultCount  = 20
+	playlistCount    = 10
 	metadataWorkers  = 4
 )
 
@@ -97,9 +100,9 @@ func Search(ctx context.Context, query string, emit func(Event)) {
 	var seen sync.Map
 	var uniqueCount atomic.Int64
 	var searchWG sync.WaitGroup
-	queryResults := make(chan queryResult, 2)
+	queryResults := make(chan queryResult, 3)
 
-	searchWG.Add(2)
+	searchWG.Add(3)
 	go func() {
 		defer searchWG.Done()
 		queryResults <- runQuery(searchCtx, query, videoResultCount, false, &seen, &uniqueCount, regularJobs, liveJobs, emit)
@@ -111,11 +114,16 @@ func Search(ctx context.Context, query string, emit func(Event)) {
 		queryResults <- runQuery(searchCtx, query+" live", liveResultCount, true, &seen, &uniqueCount, regularJobs, liveJobs, emit)
 	}()
 
+	go func() {
+		defer searchWG.Done()
+		queryResults <- runPlaylistQuery(searchCtx, query, playlistCount, &seen, &uniqueCount, liveJobs, emit)
+	}()
+
 	searchWG.Wait()
 	close(regularJobs)
 	close(liveJobs)
 
-	results := []queryResult{<-queryResults, <-queryResults}
+	results := []queryResult{<-queryResults, <-queryResults, <-queryResults}
 	var searchErr error
 	if uniqueCount.Load() == 0 {
 		var messages []string
@@ -227,6 +235,74 @@ func runQuery(
 	return queryResult{rows: rows}
 }
 
+// playlistSearchURL is YouTube's results page filtered to playlists. The ytsearch
+// prefix cannot return playlists.
+func playlistSearchURL(query string) string {
+	return "https://www.youtube.com/results?search_query=" + url.QueryEscape(query) + "&sp=EgIQAw%253D%253D"
+}
+
+// runPlaylistQuery emits playlist results and queues them for a detail lookup
+// on the priority queue, so their size and first videos show up early.
+func runPlaylistQuery(
+	ctx context.Context,
+	query string,
+	limit int,
+	seen *sync.Map,
+	uniqueCount *atomic.Int64,
+	jobs chan<- media.Video,
+	emit func(Event),
+) queryResult {
+	cmd := exec.CommandContext(ctx, "yt-dlp",
+		"--flat-playlist", "--dump-json", "--no-warnings", "--ignore-errors",
+		"--skip-download", "--socket-timeout", "7",
+		"--extractor-retries", "1", "--retries", "1",
+		"--playlist-end", strconv.Itoa(limit),
+		playlistSearchURL(query))
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return queryResult{err: err}
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return queryResult{err: fmt.Errorf("start yt-dlp: %w", err)}
+	}
+
+	rows := 0
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
+	for scanner.Scan() {
+		if ctx.Err() != nil {
+			break
+		}
+		var playlist media.Video
+		if err := json.Unmarshal(scanner.Bytes(), &playlist); err != nil || playlist.ID == "" || !playlist.IsPlaylist() {
+			continue
+		}
+		rows++
+		if _, duplicate := seen.LoadOrStore(playlist.ID, struct{}{}); !duplicate {
+			emit(Event{Kind: EventResult, Video: playlist, Count: int(uniqueCount.Add(1))})
+			select {
+			case jobs <- playlist:
+			case <-ctx.Done():
+			}
+		}
+	}
+	scanErr := scanner.Err()
+	waitErr := cmd.Wait()
+	if scanErr != nil {
+		return queryResult{rows: rows, err: scanErr}
+	}
+	if rows == 0 && waitErr != nil {
+		message := lastUsefulLine(stderr.String())
+		if message == "" {
+			message = waitErr.Error()
+		}
+		return queryResult{err: errors.New(message)}
+	}
+	return queryResult{rows: rows}
+}
+
 func resolveDetails(ctx context.Context, video media.Video, emit func(Event)) {
 	if ctx.Err() != nil {
 		return
@@ -242,6 +318,9 @@ func resolveDetails(ctx context.Context, video media.Video, emit func(Event)) {
 	}
 }
 
+// playlistPreviewVideos is how many videos a playlist lookup lists.
+const playlistPreviewVideos = 3
+
 func FetchDetails(parent context.Context, base media.Video) (media.Video, error) {
 	url := base.CanonicalURL()
 	if url == "" {
@@ -250,10 +329,21 @@ func FetchDetails(parent context.Context, base media.Video) (media.Video, error)
 	ctx, cancel := context.WithTimeout(parent, 9*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "yt-dlp",
+	args := []string{
 		"--dump-single-json", "--no-warnings", "--no-progress", "--skip-download",
 		"--no-playlist", "--ignore-no-formats-error",
-		"--socket-timeout", "6", "--extractor-retries", "1", "--retries", "1", url)
+		"--socket-timeout", "6", "--extractor-retries", "1", "--retries", "1", url,
+	}
+	if base.IsPlaylist() {
+		// A flat lookup of the first videos is quick and still reports the
+		// playlist's size, update date and description.
+		args = []string{
+			"--flat-playlist", "--dump-single-json", "--no-warnings", "--no-progress",
+			"--playlist-end", strconv.Itoa(playlistPreviewVideos),
+			"--socket-timeout", "6", "--extractor-retries", "1", "--retries", "1", url,
+		}
+	}
+	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

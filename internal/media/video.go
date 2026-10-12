@@ -38,6 +38,29 @@ type Video struct {
 	Width             int     `json:"width"`
 	Height            int     `json:"height"`
 	Availability      string  `json:"availability"`
+	// Thumbnails is only used for playlists, whose ids give no thumbnail URL.
+	Thumbnails []struct {
+		URL string `json:"url"`
+	} `json:"thumbnails"`
+
+	// Playlist fields, filled by a detail lookup.
+	PlaylistCount int             `json:"playlist_count"`
+	ModifiedDate  string          `json:"modified_date"`
+	Entries       []PlaylistEntry `json:"entries"`
+}
+
+// PlaylistEntry is one video of a playlist, as listed in a flat lookup.
+type PlaylistEntry struct {
+	Title    string  `json:"title"`
+	Duration float64 `json:"duration"`
+}
+
+// DurationText is the entry's length such as "3:06", or "" when unknown.
+func (e PlaylistEntry) DurationText() string {
+	if e.Duration <= 0 {
+		return ""
+	}
+	return FormatDuration(e.Duration)
 }
 
 type Kind int
@@ -48,6 +71,7 @@ const (
 	KindUpcoming
 	KindPastLive
 	KindShort
+	KindPlaylist
 )
 
 func (v Video) ChannelName() string {
@@ -78,6 +102,14 @@ func (v Video) ThumbnailURL() string {
 	if err == nil && parsed.Scheme == "https" && parsed.Host != "" {
 		return v.Thumbnail
 	}
+	if v.IsPlaylist() {
+		for _, t := range v.Thumbnails {
+			if parsed, err := url.Parse(t.URL); err == nil && parsed.Scheme == "https" && parsed.Host != "" {
+				return t.URL
+			}
+		}
+		return ""
+	}
 	if validVideoID.MatchString(v.ID) {
 		return "https://i.ytimg.com/vi/" + v.ID + "/mqdefault.jpg"
 	}
@@ -107,8 +139,15 @@ func (v Video) IsShort() bool {
 	return v.Duration > 0 && v.Duration <= 180 && v.Height > v.Width && v.Width > 0
 }
 
+// IsPlaylist reports whether the result is a playlist instead of one video.
+func (v Video) IsPlaylist() bool {
+	return strings.Contains(v.CanonicalURL(), "/playlist?list=")
+}
+
 func (v Video) Kind() Kind {
 	switch {
+	case v.IsPlaylist():
+		return KindPlaylist
 	case v.IsCurrentlyLive():
 		return KindLive
 	case v.IsUpcoming():
@@ -138,7 +177,12 @@ func (v Video) DurationText() string {
 	if v.Duration <= 0 {
 		return "duration unknown"
 	}
-	seconds := int(v.Duration)
+	return FormatDuration(v.Duration)
+}
+
+// FormatDuration writes seconds as "m:ss" or "h:mm:ss".
+func FormatDuration(duration float64) string {
+	seconds := int(duration)
 	hours := seconds / 3600
 	minutes := (seconds % 3600) / 60
 	secs := seconds % 60
@@ -146,6 +190,40 @@ func (v Video) DurationText() string {
 		return fmt.Sprintf("%d:%02d:%02d", hours, minutes, secs)
 	}
 	return fmt.Sprintf("%d:%02d", minutes, secs)
+}
+
+// PlaylistCountText is the number of videos in a playlist, such as "110
+// videos", or "" while it is unknown.
+func (v Video) PlaylistCountText() string {
+	switch {
+	case v.PlaylistCount <= 0:
+		return ""
+	case v.PlaylistCount == 1:
+		return "1 video"
+	}
+	return fmt.Sprintf("%d videos", v.PlaylistCount)
+}
+
+// UpdatedText says when a playlist last changed, such as "updated today", or
+// "" while it is unknown.
+func (v Video) UpdatedText(now time.Time) string {
+	updated, err := time.Parse("20060102", v.ModifiedDate)
+	if err != nil {
+		return ""
+	}
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	days := int(today.Sub(updated).Hours() / 24)
+	switch {
+	case days <= 0:
+		return "updated today"
+	case days == 1:
+		return "updated yesterday"
+	case days < 30:
+		return fmt.Sprintf("updated %dd ago", days)
+	case days < 365:
+		return fmt.Sprintf("updated %dmo ago", days/30)
+	}
+	return fmt.Sprintf("updated %dy ago", days/365)
 }
 
 // StartText describes when an upcoming stream begins, e.g. "starts in 2h 10m".
@@ -302,6 +380,15 @@ func MergeDetails(base, details Video) Video {
 	}
 	if details.Availability != "" {
 		base.Availability = details.Availability
+	}
+	if details.PlaylistCount > 0 {
+		base.PlaylistCount = details.PlaylistCount
+	}
+	if details.ModifiedDate != "" {
+		base.ModifiedDate = details.ModifiedDate
+	}
+	if len(details.Entries) > 0 {
+		base.Entries = details.Entries
 	}
 	return base
 }
