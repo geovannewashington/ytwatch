@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,6 +45,16 @@ func validFileID(id string) bool {
 	return true
 }
 
+// cacheVersion is part of the cache file name. Raise it when the choice of
+// thumbnails improves, so old low-resolution files are not reused.
+const cacheVersion = "q2"
+
+// errUnusable marks a candidate that is missing or in a format the overlay may
+// not read, so the next candidate is tried. Network errors are not wrapped in
+// it: they fail the download so a bad moment does not cache a worse image.
+var errUnusable = errors.New("thumbnail not usable")
+
+// Download saves the best usable thumbnail of v and returns its path.
 func Download(ctx context.Context, v media.Video) (string, error) {
 	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
 		return "", err
@@ -53,36 +62,29 @@ func Download(ctx context.Context, v media.Video) (string, error) {
 	if !validFileID(v.ID) {
 		return "", errors.New("invalid video ID")
 	}
-	thumbURL := v.ThumbnailURL()
-	parsed, err := url.Parse(thumbURL)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+	candidates := v.ThumbnailCandidates()
+	if len(candidates) == 0 {
 		return "", errors.New("no valid HTTPS thumbnail URL")
 	}
 
-	destination := filepath.Join(cacheDir, v.ID+".jpg")
+	destination := filepath.Join(cacheDir, v.ID+"-"+cacheVersion+".jpg")
 	if info, err := os.Stat(destination); err == nil && info.Size() > 0 {
 		return destination, nil
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, thumbURL, nil)
-	if err != nil {
-		return "", err
+	var data []byte
+	for _, candidate := range candidates {
+		image, err := fetchImage(ctx, candidate)
+		if errors.Is(err, errUnusable) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		data = image
+		break
 	}
-	request.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) ytwatch/1.0")
-	client := &http.Client{Timeout: 5 * time.Second}
-	response, err := client.Do(request)
-	if err != nil {
-		return "", err
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("thumbnail server returned %s", response.Status)
-	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, 5*1024*1024+1))
-	if err != nil {
-		return "", err
-	}
-	if len(data) == 0 || len(data) > 5*1024*1024 {
-		return "", errors.New("thumbnail is empty or too large")
+	if data == nil {
+		return "", errors.New("no usable thumbnail")
 	}
 	temp := destination + ".tmp-" + fmt.Sprint(os.Getpid())
 	if err := os.WriteFile(temp, data, 0o600); err != nil {
@@ -95,8 +97,40 @@ func Download(ctx context.Context, v media.Video) (string, error) {
 	return destination, nil
 }
 
-// Overlay manages one Ueberzug++ Wayland layer. It is called only from the
-// Bubble Tea event loop, so its stdin writer does not need external locking.
+// fetchImage downloads one candidate. WebP is rejected because it is often
+// served under a .jpg name and not every ueberzugpp build can read it.
+func fetchImage(ctx context.Context, thumbURL string) ([]byte, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, thumbURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) ytwatch/1.0")
+	client := &http.Client{Timeout: 5 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	switch response.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound, http.StatusForbidden, http.StatusGone:
+		return nil, errUnusable
+	default:
+		return nil, fmt.Errorf("thumbnail server returned %s", response.Status)
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, 5*1024*1024+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 || len(data) > 5*1024*1024 {
+		return nil, errUnusable
+	}
+	if http.DetectContentType(data) == "image/webp" {
+		return nil, errUnusable
+	}
+	return data, nil
+}
+
 type Overlay struct {
 	mu     sync.Mutex
 	cmd    *exec.Cmd

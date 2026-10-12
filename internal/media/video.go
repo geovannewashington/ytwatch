@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -38,15 +39,20 @@ type Video struct {
 	Width             int     `json:"width"`
 	Height            int     `json:"height"`
 	Availability      string  `json:"availability"`
-	// Thumbnails is only used for playlists, whose ids give no thumbnail URL.
-	Thumbnails []struct {
-		URL string `json:"url"`
-	} `json:"thumbnails"`
+	// Thumbnails lists the sizes a search result offers.
+	Thumbnails []ThumbnailRef `json:"thumbnails"`
 
 	// Playlist fields, filled by a detail lookup.
 	PlaylistCount int             `json:"playlist_count"`
 	ModifiedDate  string          `json:"modified_date"`
 	Entries       []PlaylistEntry `json:"entries"`
+}
+
+// ThumbnailRef is one thumbnail size of a result.
+type ThumbnailRef struct {
+	URL    string `json:"url"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
 }
 
 // PlaylistEntry is one video of a playlist, as listed in a flat lookup.
@@ -97,23 +103,38 @@ func (v Video) CanonicalURL() string {
 	return ""
 }
 
-func (v Video) ThumbnailURL() string {
-	parsed, err := url.Parse(v.Thumbnail)
-	if err == nil && parsed.Scheme == "https" && parsed.Host != "" {
-		return v.Thumbnail
-	}
-	if v.IsPlaylist() {
-		for _, t := range v.Thumbnails {
-			if parsed, err := url.Parse(t.URL); err == nil && parsed.Scheme == "https" && parsed.Host != "" {
-				return t.URL
-			}
+// ThumbnailCandidates lists thumbnail URLs from best to worst; the caller uses
+// the first one that works. A plain hq720.jpg is a 1280x720 JPEG but is missing
+// for some old videos. The sizes in the search result come next, largest first,
+// but those are often WebP. The 320 px mqdefault.jpg always exists and is the
+// last resort, because it looks soft once the preview scales it up.
+func (v Video) ThumbnailCandidates() []string {
+	video := !v.IsPlaylist() && validVideoID.MatchString(v.ID)
+	var out []string
+	add := func(raw string) {
+		if !isHTTPS(raw) || slices.Contains(out, raw) {
+			return
 		}
-		return ""
+		out = append(out, raw)
 	}
-	if validVideoID.MatchString(v.ID) {
-		return "https://i.ytimg.com/vi/" + v.ID + "/mqdefault.jpg"
+	if video {
+		add("https://i.ytimg.com/vi/" + v.ID + "/hq720.jpg")
 	}
-	return ""
+	listed := slices.Clone(v.Thumbnails)
+	slices.SortStableFunc(listed, func(a, b ThumbnailRef) int { return b.Width - a.Width })
+	for _, t := range listed {
+		add(t.URL)
+	}
+	add(v.Thumbnail)
+	if video {
+		add("https://i.ytimg.com/vi/" + v.ID + "/mqdefault.jpg")
+	}
+	return out
+}
+
+func isHTTPS(raw string) bool {
+	parsed, err := url.Parse(raw)
+	return err == nil && parsed.Scheme == "https" && parsed.Host != ""
 }
 
 func (v Video) IsCurrentlyLive() bool {

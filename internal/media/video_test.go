@@ -2,6 +2,7 @@ package media
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -57,8 +58,8 @@ func TestPlaylistResult(t *testing.T) {
 	if !v.IsPlaylist() || v.Kind() != KindPlaylist {
 		t.Fatalf("want playlist, got kind %v", v.Kind())
 	}
-	if got := v.ThumbnailURL(); got != "https://i.ytimg.com/vi/abc/hq.jpg" {
-		t.Fatalf("thumbnail = %q", got)
+	if got := v.ThumbnailCandidates(); len(got) != 1 || got[0] != "https://i.ytimg.com/vi/abc/hq.jpg" {
+		t.Fatalf("thumbnail candidates = %v", got)
 	}
 	if (Video{ID: "video0001"}).IsPlaylist() {
 		t.Fatal("a plain video is not a playlist")
@@ -108,5 +109,36 @@ func TestUpdatedText(t *testing.T) {
 		if got := (Video{ModifiedDate: date}).UpdatedText(now); got != want {
 			t.Errorf("UpdatedText(%q) = %q, want %q", date, got, want)
 		}
+	}
+}
+
+func TestThumbnailCandidatesGoFromBestToWorst(t *testing.T) {
+	v := Video{ID: "video0001", Thumbnails: []ThumbnailRef{
+		{URL: "https://i.ytimg.com/vi/video0001/hq720.jpg?sqp=small", Width: 360},
+		{URL: "https://i.ytimg.com/vi/video0001/hq720.jpg?sqp=large", Width: 720},
+		{URL: "http://insecure.example/huge.jpg", Width: 4000},
+	}}
+	want := []string{
+		"https://i.ytimg.com/vi/video0001/hq720.jpg",
+		"https://i.ytimg.com/vi/video0001/hq720.jpg?sqp=large",
+		"https://i.ytimg.com/vi/video0001/hq720.jpg?sqp=small",
+		"https://i.ytimg.com/vi/video0001/mqdefault.jpg",
+	}
+	if got := v.ThumbnailCandidates(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v\nwant %v", got, want)
+	}
+}
+
+func TestThumbnailCandidatesForPlaylistsAndUnknownIDs(t *testing.T) {
+	playlist := Video{
+		ID:         "PLpCqPSEm2Xe8sEY2haMDUVgwbkIs5NCJI",
+		URL:        "https://www.youtube.com/playlist?list=PLpCqPSEm2Xe8sEY2haMDUVgwbkIs5NCJI",
+		Thumbnails: []ThumbnailRef{{URL: "https://i.ytimg.com/vi/abc/hqdefault.jpg?sqp=x", Width: 480}},
+	}
+	if got := playlist.ThumbnailCandidates(); len(got) != 1 || got[0] != playlist.Thumbnails[0].URL {
+		t.Fatalf("playlist candidates = %v", got)
+	}
+	if got := (Video{}).ThumbnailCandidates(); len(got) != 0 {
+		t.Fatalf("no id and no list should give none, got %v", got)
 	}
 }
