@@ -25,7 +25,7 @@ if echo "$args" | grep -q -- '--dump-single-json'; then
 fi
 case "$args" in
   *'ytsearch20:Go interfaces live'*)
-    printf '%s\n' '{"id":"live12345","title":"Live coding right now","webpage_url":"https://www.youtube.com/watch?v=live12345"}'
+    printf '%s\n' '{"id":"live12345","title":"Live coding right now","webpage_url":"https://www.youtube.com/watch?v=live12345","live_status":"is_live"}'
     printf '%s\n' '{"id":"video12345","title":"Go interfaces recorded","webpage_url":"https://www.youtube.com/watch?v=video12345"}'
     ;;
   *'ytsearch35:Go interfaces'*)
@@ -78,5 +78,56 @@ func TestPlaylistSearchURL(t *testing.T) {
 	want := "https://www.youtube.com/results?search_query=go+tutorial+%26+more&sp=EgIQAw%253D%253D"
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+// The main query keeps YouTube's order, a playlist comes after a few results,
+// and the live query adds only streams that are on air, after the rest.
+func TestSearchRanksResultsAndKeepsOnlyLiveFromTheLiveQuery(t *testing.T) {
+	binDir := t.TempDir()
+	fake := `#!/bin/sh
+args="$*"
+case "$args" in
+  *--dump-single-json*) exit 1 ;;
+  *'ytsearch20:topic live'*)
+    printf '%s\n' '{"id":"junk000001","title":"Unrelated video"}'
+    printf '%s\n' '{"id":"stream00001","title":"A stream","live_status":"is_live"}'
+    ;;
+  *'ytsearch35:topic'*)
+    printf '%s\n' '{"id":"first000001","title":"First"}'
+    printf '%s\n' '{"id":"second00001","title":"Second"}'
+    printf '%s\n' '{"id":"third000001","title":"Third"}'
+    ;;
+  *results?search_query=*)
+    printf '%s\n' '{"id":"PLplaylist000000000000000000000001","title":"A playlist","_type":"url","url":"https://www.youtube.com/playlist?list=PLplaylist000000000000000000000001"}'
+    ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(binDir, "yt-dlp"), []byte(fake), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var mu sync.Mutex
+	rank := map[string]int{}
+	Search(ctx, "topic", Filters{}, func(event Event) {
+		if event.Kind == EventResult {
+			mu.Lock()
+			rank[event.Video.ID] = event.Rank
+			mu.Unlock()
+		}
+	})
+	if _, found := rank["junk000001"]; found {
+		t.Error("a video from the live query that is not live must be dropped")
+	}
+	order := []string{"first000001", "second00001", "third000001", "PLplaylist000000000000000000000001", "stream00001"}
+	for i := 1; i < len(order); i++ {
+		a, aok := rank[order[i-1]]
+		b, bok := rank[order[i]]
+		if !aok || !bok || a >= b {
+			t.Fatalf("want %s (rank %d) above %s (rank %d); all ranks: %v", order[i-1], a, order[i], b, rank)
+		}
 	}
 }

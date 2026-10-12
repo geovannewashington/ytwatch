@@ -113,6 +113,7 @@ type Model struct {
 	searchEvents <-chan youtube.Event
 
 	items         []media.Video
+	ranks         []int // ranks[i] is the sort rank of items[i], see youtube.Event.Rank
 	selected      int
 	top           int
 	width         int
@@ -253,7 +254,7 @@ func (m *Model) beginSearch(query string) tea.Cmd {
 	m.searchDone = false
 	m.metadataDone = false
 	m.searchError = ""
-	m.items = nil
+	m.items, m.ranks = nil, nil
 	m.selected = 0
 	m.top = 0
 	m.countPrefix = ""
@@ -447,6 +448,38 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// insertResult adds a result at the place its rank gives, after results of the
+// same rank. When it lands above the selection, the selection moves down with
+// the result it was on, so the list does not jump under the user.
+func (m *Model) insertResult(v media.Video, rank int) []tea.Cmd {
+	for len(m.ranks) < len(m.items) {
+		m.ranks = append(m.ranks, 1<<30) // items set without a rank go last
+	}
+	at := len(m.items)
+	for i, r := range m.ranks {
+		if r > rank {
+			at = i
+			break
+		}
+	}
+	m.items = slices.Insert(m.items, at, v)
+	m.ranks = slices.Insert(m.ranks, at, rank)
+	if len(m.items) == 1 {
+		m.selected, m.top = 0, 0
+		return []tea.Cmd{m.scheduleThumbnail()}
+	}
+	if at <= m.selected && m.selected > 0 {
+		m.selected++
+		if m.visual && at <= m.visualAnchor {
+			m.visualAnchor++
+		}
+	} else if at == 0 {
+		// A better first result arrived while the cursor was on the first row.
+		return []tea.Cmd{m.scheduleThumbnail()}
+	}
+	return nil
+}
+
 func (m *Model) handleSearchEvent(event youtube.Event) []tea.Cmd {
 	switch event.Kind {
 	case youtube.EventResult:
@@ -455,11 +488,7 @@ func (m *Model) handleSearchEvent(event youtube.Event) []tea.Cmd {
 				return nil
 			}
 		}
-		m.items = append(m.items, event.Video)
-		if len(m.items) == 1 {
-			m.selected, m.top = 0, 0
-			return []tea.Cmd{m.scheduleThumbnail()}
-		}
+		return m.insertResult(event.Video, event.Rank)
 	case youtube.EventDetails:
 		for i := range m.items {
 			if m.items[i].ID == event.Video.ID {

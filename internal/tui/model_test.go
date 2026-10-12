@@ -648,3 +648,41 @@ func TestQualityMenuPicksAndShowsInTheFooter(t *testing.T) {
 		t.Fatalf("menu should start on the current level, got %d", m.qualityDraft)
 	}
 }
+
+func TestResultsAreInsertedByRankAndTheSelectionStays(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 120, 30
+	add := func(id string, rank int) {
+		m.handleSearchEvent(youtube.Event{Kind: youtube.EventResult, Video: media.Video{ID: id, Title: id}, Rank: rank})
+	}
+	// They arrive out of order, as the queries finish at different times.
+	add("extra0001", 400)
+	add("third0001", 20)
+	add("first0001", 0)
+	add("second001", 10)
+	var ids []string
+	for _, v := range m.items {
+		ids = append(ids, v.ID)
+	}
+	if got := strings.Join(ids, ","); got != "first0001,second001,third0001,extra0001" {
+		t.Fatalf("order = %s", got)
+	}
+
+	// The user moved to "third"; a result that lands above it must not change
+	// what is selected.
+	m.selected = 2
+	add("between01", 15)
+	if v, _ := m.selectedVideo(); v.ID != "third0001" {
+		t.Fatalf("selection moved to %s", v.ID)
+	}
+	// One that lands below does not move it either.
+	add("last00001", 900)
+	if v, _ := m.selectedVideo(); v.ID != "third0001" {
+		t.Fatalf("selection moved to %s", v.ID)
+	}
+	// Equal ranks keep their arrival order.
+	add("same00001", 15)
+	if m.items[2].ID != "between01" || m.items[3].ID != "same00001" {
+		t.Fatalf("equal ranks should keep arrival order: %v", m.items)
+	}
+}

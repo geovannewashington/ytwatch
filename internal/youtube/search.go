@@ -38,7 +38,32 @@ type Event struct {
 	Video media.Video
 	Count int
 	Err   error
+	// Rank orders results: a lower rank is shown higher. Queries finish in any
+	// order, so the interface places each result by its rank instead of by
+	// arrival, which keeps YouTube's own ordering.
+	Rank int
 }
+
+// ranking turns the position of a result in its query into a Event.Rank:
+// base + position*step. Queries use different bases so their results mix the
+// way a reader expects: the main query first, a playlist every few results,
+// and extra live streams after them.
+type ranking struct {
+	base, step int
+	// onlyLive keeps only streams that are on air or upcoming. The query that
+	// looks for live streams returns unrelated videos otherwise.
+	onlyLive bool
+}
+
+func (r ranking) at(position int) int { return r.base + position*r.step }
+
+// The main query's results are 10 apart, so a playlist (rank 80, then every
+// 40) lands after the 8th result, then after every 4th.
+var (
+	mainRanking     = ranking{base: 0, step: 10}
+	playlistRanking = ranking{base: 80, step: 40}
+	liveRanking     = ranking{base: 360, step: 10, onlyLive: true}
+)
 
 type queryResult struct {
 	rows int
@@ -113,25 +138,25 @@ func Search(ctx context.Context, query string, filters Filters, emit func(Event)
 			})
 		} else if filters.Type == TypePlaylists {
 			queries = append(queries, func() queryResult {
-				return runPlaylistQuery(searchCtx, resultsURL(query, filters), filteredPlaylistCount, &seen, &uniqueCount, liveJobs, emit)
+				return runPlaylistQuery(searchCtx, resultsURL(query, filters), filteredPlaylistCount, mainRanking, &seen, &uniqueCount, liveJobs, emit)
 			})
 		} else {
 			queries = append(queries, func() queryResult {
-				return runQuery(searchCtx, resultsURL(query, filters), filteredResultCount, filters.Type == TypeLive, &seen, &uniqueCount, regularJobs, liveJobs, emit)
+				return runQuery(searchCtx, resultsURL(query, filters), filteredResultCount, mainRanking, filters.Type == TypeLive, &seen, &uniqueCount, regularJobs, liveJobs, emit)
 			})
 		}
 	} else {
 		queries = append(queries,
 			func() queryResult {
-				return runQuery(searchCtx, fmt.Sprintf("ytsearch%d:%s", videoResultCount, query), 0, false, &seen, &uniqueCount, regularJobs, liveJobs, emit)
+				return runQuery(searchCtx, fmt.Sprintf("ytsearch%d:%s", videoResultCount, query), 0, mainRanking, false, &seen, &uniqueCount, regularJobs, liveJobs, emit)
 			},
 			func() queryResult {
 				// Adding "live" broadens discovery of currently broadcasting channels.
 				// Full metadata still determines whether a result is actually live or a VOD.
-				return runQuery(searchCtx, fmt.Sprintf("ytsearch%d:%s live", liveResultCount, query), 0, true, &seen, &uniqueCount, regularJobs, liveJobs, emit)
+				return runQuery(searchCtx, fmt.Sprintf("ytsearch%d:%s live", liveResultCount, query), 0, liveRanking, true, &seen, &uniqueCount, regularJobs, liveJobs, emit)
 			},
 			func() queryResult {
-				return runPlaylistQuery(searchCtx, playlistSearchURL(query), playlistCount, &seen, &uniqueCount, liveJobs, emit)
+				return runPlaylistQuery(searchCtx, playlistSearchURL(query), playlistCount, playlistRanking, &seen, &uniqueCount, liveJobs, emit)
 			},
 		)
 	}
@@ -182,6 +207,7 @@ func runQuery(
 	ctx context.Context,
 	source string,
 	listEnd int,
+	order ranking,
 	prioritizeLive bool,
 	seen *sync.Map,
 	uniqueCount *atomic.Int64,
@@ -221,7 +247,11 @@ func runQuery(
 		if err := json.Unmarshal(scanner.Bytes(), &video); err != nil || video.ID == "" {
 			continue
 		}
+		position := rows
 		rows++
+		if order.onlyLive && !video.IsCurrentlyLive() && !video.IsUpcoming() {
+			continue
+		}
 		if video.Title == "" {
 			video.Title = "Untitled video"
 		}
@@ -232,7 +262,7 @@ func runQuery(
 		_, duplicate := seen.LoadOrStore(video.ID, struct{}{})
 		if !duplicate {
 			count := int(uniqueCount.Add(1))
-			emit(Event{Kind: EventResult, Video: video, Count: count})
+			emit(Event{Kind: EventResult, Video: video, Count: count, Rank: order.at(position)})
 			if prioritizeLive {
 				select {
 				case liveJobs <- video:
@@ -280,6 +310,7 @@ func runPlaylistQuery(
 	ctx context.Context,
 	source string,
 	limit int,
+	order ranking,
 	seen *sync.Map,
 	uniqueCount *atomic.Int64,
 	jobs chan<- media.Video,
@@ -312,9 +343,10 @@ func runPlaylistQuery(
 		if err := json.Unmarshal(scanner.Bytes(), &playlist); err != nil || playlist.ID == "" || !playlist.IsPlaylist() {
 			continue
 		}
+		position := rows
 		rows++
 		if _, duplicate := seen.LoadOrStore(playlist.ID, struct{}{}); !duplicate {
-			emit(Event{Kind: EventResult, Video: playlist, Count: int(uniqueCount.Add(1))})
+			emit(Event{Kind: EventResult, Video: playlist, Count: int(uniqueCount.Add(1)), Rank: order.at(position)})
 			select {
 			case jobs <- playlist:
 			case <-ctx.Done():

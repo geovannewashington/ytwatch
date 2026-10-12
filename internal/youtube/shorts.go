@@ -159,14 +159,14 @@ func runShortsQuery(
 	if err != nil {
 		return queryResult{err: err}
 	}
-	for _, short := range shorts {
+	for position, short := range shorts {
 		if ctx.Err() != nil {
 			break
 		}
 		if _, duplicate := seen.LoadOrStore(short.ID, struct{}{}); duplicate {
 			continue
 		}
-		emit(Event{Kind: EventResult, Video: short, Count: int(uniqueCount.Add(1))})
+		emit(Event{Kind: EventResult, Video: short, Count: int(uniqueCount.Add(1)), Rank: mainRanking.at(position)})
 		select {
 		case jobs <- short:
 		case <-ctx.Done():
