@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -157,16 +156,12 @@ func OpenYouTubeChat(v media.Video, cfg config.Config) error {
 	if !validID(v.ID) {
 		return fmt.Errorf("could not identify the live video for chat")
 	}
-	browser := cfg.Chat.Browser
-	if browser == "" {
-		browser = "firefox"
-	}
-	path, err := exec.LookPath(browser)
+	browser, err := resolveBrowser(cfg.Chat.Browser, os.Getenv("BROWSER"), defaultBrowserDesktop(), exec.LookPath)
 	if err != nil {
-		return fmt.Errorf("%s is not installed", browser)
+		return err
 	}
 	url := "https://www.youtube.com/live_chat?is_popout=1&v=" + v.ID
-	cmd := exec.Command(path, "--new-window", url)
+	cmd := exec.Command(browser.path, append(browser.args, url)...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, io.Discard, io.Discard
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
@@ -177,11 +172,13 @@ func OpenYouTubeChat(v media.Video, cfg config.Config) error {
 	}
 	go func() { _ = cmd.Wait() }()
 	// An already-running browser hands the URL to its main process, so match
-	// any new window of that browser rather than the pid we started.
-	name := strings.ToLower(filepath.Base(browser))
-	go wm.MoveNew(backend, before, func(w wm.Window) bool {
-		return strings.Contains(strings.ToLower(w.App), name)
-	}, cfg.Chat.Workspace)
+	// any new window of that browser rather than the pid we started. With
+	// xdg-open the browser is unknown, so the window is not moved.
+	if browser.name != "" {
+		go wm.MoveNew(backend, before, func(w wm.Window) bool {
+			return strings.Contains(strings.ToLower(w.App), browser.name)
+		}, cfg.Chat.Workspace)
+	}
 	return nil
 }
 

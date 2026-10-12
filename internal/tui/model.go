@@ -1152,7 +1152,7 @@ func (m *Model) renderHelp() string {
 	b.WriteString("\n")
 	b.WriteString(strings.Join([]string{
 		helpStyle.Render("  Search includes regular videos and a live-oriented query."),
-		helpStyle.Render("  Current livestreams open YouTube chat in Firefox."),
+		helpStyle.Render("  Current livestreams open YouTube chat in your browser."),
 		helpStyle.Render("  Shorts are marked [SHORT]; ordinary videos have no type label."),
 	}, "\n"))
 	box := helpBoxStyle.Width(min(78, m.width-4)).Render(b.String())

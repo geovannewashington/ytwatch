@@ -40,12 +40,13 @@ type Chat struct {
 	Enabled bool
 	// Workspace is the workspace the chat window is moved to. See MPV.Workspace.
 	Workspace string
-	// Browser is the command used to open the chat window.
+	// Browser is the command used to open the chat window, with optional
+	// arguments. Empty uses $BROWSER, then the desktop's default browser.
 	Browser string
 }
 
 func Default() Config {
-	return Config{Chat: Chat{Enabled: true, Browser: "firefox"}}
+	return Config{Chat: Chat{Enabled: true}}
 }
 
 // Path returns the location of the config file.

@@ -38,7 +38,7 @@ func TestParseErrors(t *testing.T) {
 
 func TestDefaults(t *testing.T) {
 	cfg, _ := Parse("")
-	if !cfg.Chat.Enabled || cfg.Chat.Browser != "firefox" {
+	if !cfg.Chat.Enabled || cfg.Chat.Browser != "" {
 		t.Fatalf("unexpected defaults: %+v", cfg)
 	}
 }
