@@ -3,6 +3,7 @@ package wm
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -180,5 +181,60 @@ func TestName(t *testing.T) {
 		if got := Name(b); got != want {
 			t.Errorf("Name(%T) = %q, want %q", b, got, want)
 		}
+	}
+}
+
+func TestHyprlandMoveFallsBackToLua(t *testing.T) {
+	var calls [][]string
+	old := hyprctl
+	t.Cleanup(func() { hyprctl = old })
+	hyprctl = func(ctx context.Context, args ...string) error {
+		calls = append(calls, args)
+		if args[0] == "dispatch" {
+			// Hyprland with the Lua config rejects the legacy dispatcher.
+			return errors.New("exit status 7")
+		}
+		return nil
+	}
+	if err := (hyprland{}).Move(context.Background(), "0x5992", `name:a"b`); err != nil {
+		t.Fatalf("Move: %v", err)
+	}
+	want := []string{
+		"dispatch movetoworkspacesilent name:a\"b,address:0x5992",
+		`eval hl.dispatch(hl.dsp.window.move({ workspace = "name:a\"b", follow = false, window = "address:0x5992" }))`,
+	}
+	if len(calls) != len(want) {
+		t.Fatalf("calls = %q, want %q", calls, want)
+	}
+	for i, args := range calls {
+		if got := strings.Join(args, " "); got != want[i] {
+			t.Errorf("call %d = %s\nwant      %s", i, got, want[i])
+		}
+	}
+}
+
+func TestHyprlandMoveLegacyOnly(t *testing.T) {
+	calls := 0
+	old := hyprctl
+	t.Cleanup(func() { hyprctl = old })
+	hyprctl = func(ctx context.Context, args ...string) error { calls++; return nil }
+	if err := (hyprland{}).Move(context.Background(), "0x1", "3"); err != nil || calls != 1 {
+		t.Fatalf("err = %v, calls = %d; want nil, 1", err, calls)
+	}
+}
+
+func TestHyprlandMoveReportsBothErrors(t *testing.T) {
+	legacy, lua := errors.New("legacy failed"), errors.New("eval failed")
+	old := hyprctl
+	t.Cleanup(func() { hyprctl = old })
+	hyprctl = func(ctx context.Context, args ...string) error {
+		if args[0] == "dispatch" {
+			return legacy
+		}
+		return lua
+	}
+	err := (hyprland{}).Move(context.Background(), "0x1", "3")
+	if !errors.Is(err, legacy) || !errors.Is(err, lua) {
+		t.Fatalf("err = %v, want both the legacy and the eval error", err)
 	}
 }

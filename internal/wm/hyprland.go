@@ -3,7 +3,10 @@ package wm
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os/exec"
+	"strings"
 )
 
 type hyprland struct{}
@@ -38,9 +41,31 @@ func parseClients(data []byte) (map[string]Window, error) {
 	return windows, nil
 }
 
+// hyprctl runs one hyprctl command. It is a variable so tests can replace it.
+var hyprctl = func(ctx context.Context, args ...string) error {
+	return exec.CommandContext(ctx, "hyprctl", args...).Run()
+}
+
 // Move uses the silent dispatcher so the user's focus stays on the current
 // workspace. workspace uses Hyprland syntax, for example "3" or "name:video".
+// Hyprland with a Lua config (as Omarchy ships it) rejects the
+// legacy dispatcher, so Move then sends the same move as Lua through eval.
 func (hyprland) Move(ctx context.Context, id, workspace string) error {
 	arg := workspace + ",address:" + id
-	return exec.CommandContext(ctx, "hyprctl", "dispatch", "movetoworkspacesilent", arg).Run()
+	legacyErr := hyprctl(ctx, "dispatch", "movetoworkspacesilent", arg)
+	if legacyErr == nil {
+		return nil
+	}
+	lua := fmt.Sprintf("hl.dispatch(hl.dsp.window.move({ workspace = %s, follow = false, window = %s }))",
+		luaString(workspace), luaString("address:"+id))
+	if err := hyprctl(ctx, "eval", lua); err != nil {
+		return errors.Join(legacyErr, err)
+	}
+	return nil
+}
+
+// luaString quotes s as a Lua string literal.
+func luaString(s string) string {
+	s = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`).Replace(s)
+	return `"` + s + `"`
 }
