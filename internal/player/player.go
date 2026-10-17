@@ -228,7 +228,7 @@ func OpenYouTubeChat(v media.Video, cfg config.Config) error {
 	if browser.name != "" {
 		go wm.MoveNew(backend, before, func(w wm.Window) bool {
 			return strings.Contains(strings.ToLower(w.App), browser.name)
-		}, cfg.Chat.Workspace)
+		}, cmp.Or(cfg.Chat.Workspace, cfg.MPV.Workspace))
 	}
 	return nil
 }

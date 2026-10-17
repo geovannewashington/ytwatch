@@ -123,7 +123,7 @@ cookies_from_browser = "firefox"   # see Troubleshooting
 
 [chat]
 enabled = true
-workspace = "4"
+# workspace = "4"            # default: the same as mpv, so chat opens next to the video
 
 [download]
 dir = "~/Videos/youtube"

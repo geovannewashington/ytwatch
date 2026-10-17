@@ -141,6 +141,7 @@ type Chat struct {
 	// Enabled controls whether live streams open YouTube's chat pop-out.
 	Enabled bool
 	// Workspace is the workspace the chat window is moved to. See MPV.Workspace.
+	// Empty uses the mpv workspace, so chat opens next to the video.
 	Workspace string
 	// Browser is the command used to open the chat window, with optional
 	// arguments. Empty uses $BROWSER, then the desktop's default browser.
