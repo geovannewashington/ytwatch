@@ -19,10 +19,9 @@ func TestSearchIncludesLiveOrientedResults(t *testing.T) {
 	fake := `#!/bin/sh
 args="$*"
 if echo "$args" | grep -q -- '--dump-single-json'; then
-  case "$args" in
-    *v=live12345*) printf '%s\n' '{"id":"live12345","title":"Live coding right now","webpage_url":"https://www.youtube.com/watch?v=live12345","live_status":"is_live","is_live":true,"concurrent_view_count":42,"description":"Current live stream"}' ;;
-    *v=video12345*) printf '%s\n' '{"id":"video12345","title":"Go interfaces recorded","webpage_url":"https://www.youtube.com/watch?v=video12345","live_status":"was_live","was_live":true,"duration":900,"description":"Recorded stream"}' ;;
-  esac
+  # A batch holds several URLs, so every match is printed.
+  case "$args" in *v=live12345*) printf '%s\n' '{"id":"live12345","title":"Live coding right now","webpage_url":"https://www.youtube.com/watch?v=live12345","live_status":"is_live","is_live":true,"concurrent_view_count":42,"description":"Current live stream"}' ;; esac
+  case "$args" in *v=video12345*) printf '%s\n' '{"id":"video12345","title":"Go interfaces recorded","webpage_url":"https://www.youtube.com/watch?v=video12345","live_status":"was_live","was_live":true,"duration":900,"description":"Recorded stream"}' ;; esac
   exit 0
 fi
 case "$args" in
@@ -194,5 +193,38 @@ func TestRanksOfDifferentSourcesNeverTie(t *testing.T) {
 	}
 	for p := 0; p < shortResultCount; p++ {
 		add(other(p, "unrelated"), "other Short")
+	}
+}
+
+// Several videos share one yt-dlp run, and each result is matched to its video
+// by id, whatever the order of the output.
+func TestFetchDetailsBatchUsesOneRunForSeveralVideos(t *testing.T) {
+	binDir := t.TempDir()
+	log := filepath.Join(binDir, "runs.log")
+	fake := "#!/bin/sh\necho run >> " + log + "\n" +
+		`printf '%s\n' '{"id":"bbbbbbbbbbb","title":"B","duration":20}'` + "\n" +
+		`printf '%s\n' '{"id":"aaaaaaaaaaa","title":"A","duration":10}'` + "\n"
+	if err := os.WriteFile(filepath.Join(binDir, "yt-dlp"), []byte(fake), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	videos := []media.Video{{ID: "aaaaaaaaaaa", Title: "a"}, {ID: "bbbbbbbbbbb", Title: "b"}}
+	got := map[string]float64{}
+	err := FetchDetailsBatch(context.Background(), videos, locale.Locale{}, func(v media.Video) {
+		if !v.Detailed {
+			t.Errorf("%s should be marked as detailed", v.ID)
+		}
+		got[v.ID] = v.Duration
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["aaaaaaaaaaa"] != 10 || got["bbbbbbbbbbb"] != 20 {
+		t.Fatalf("details were matched to the wrong videos: %v", got)
+	}
+	data, _ := os.ReadFile(log)
+	if runs := strings.Count(string(data), "run"); runs != 1 {
+		t.Fatalf("yt-dlp ran %d times, want 1", runs)
 	}
 }

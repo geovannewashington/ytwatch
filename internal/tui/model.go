@@ -76,6 +76,18 @@ type downloadDoneMsg struct {
 
 type animationMsg struct{}
 
+// detailsDelayMsg fires when a row has stayed selected for a moment.
+type detailsDelayMsg struct {
+	id         string
+	generation int
+}
+
+// detailsLoadedMsg carries the details of one result looked up on its own.
+type detailsLoadedMsg struct {
+	generation int
+	video      media.Video
+}
+
 // noteMark splits a status message from its note. The footer shows the note
 // dimmed after the message. sanitize removes control characters from titles,
 // so text from the network cannot contain it.
@@ -146,6 +158,7 @@ type Model struct {
 
 	generation   int
 	searchCancel context.CancelFunc
+	detailsAsked map[string]bool // results whose details were already requested one by one
 	searchEvents <-chan youtube.Event
 
 	items         []media.Video
@@ -301,6 +314,7 @@ func (m *Model) startStream(status string, run func(ctx context.Context, emit fu
 
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.searchCancel = cancel
+	m.detailsAsked = map[string]bool{}
 	m.generation++
 	generation := m.generation
 	m.endVisual()
@@ -468,6 +482,18 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.thumbCancel = cancel
 		m.thumbLoadingID = msg.id
 		return m, loadThumbnail(ctx, v, msg.sequence)
+
+	case detailsDelayMsg:
+		if msg.generation != m.generation || m.selectedID() != msg.id {
+			return m, nil
+		}
+		return m, m.lookUpSelectedDetails()
+
+	case detailsLoadedMsg:
+		if msg.generation != m.generation {
+			return m, nil
+		}
+		return m, tea.Batch(m.handleSearchEvent(youtube.Event{Kind: youtube.EventDetails, Video: msg.video})...)
 
 	case thumbnailLoadedMsg:
 		if msg.sequence != m.thumbSequence {
@@ -662,6 +688,7 @@ func (m *Model) handleSearchEvent(event youtube.Event) []tea.Cmd {
 		if len(m.items) > 0 && len(m.playing) == 0 {
 			m.status = m.resultsStatus()
 		}
+		return []tea.Cmd{m.lookUpSelectedDetails()}
 	}
 	return nil
 }
@@ -1171,7 +1198,48 @@ func (m *Model) selectedID() string {
 	return v.ID
 }
 
+// detailsDelay is how long a row stays selected before its details are looked
+// up, so scrolling past rows does not start a yt-dlp run for each.
+const detailsDelay = 400 * time.Millisecond
+
+// scheduleThumbnail is called whenever the selection may have changed. It
+// schedules the thumbnail and, for a row without details, its detail lookup.
 func (m *Model) scheduleThumbnail() tea.Cmd {
+	cmds := []tea.Cmd{m.scheduleThumbnailLoad()}
+	if v, ok := m.selectedVideo(); ok && !v.Detailed {
+		id, generation := v.ID, m.generation
+		cmds = append(cmds, tea.Tick(detailsDelay, func(time.Time) tea.Msg {
+			return detailsDelayMsg{id: id, generation: generation}
+		}))
+	}
+	return tea.Batch(cmds...)
+}
+
+// lookUpSelectedDetails fetches the details of the selected row when the
+// search did not. The search itself only looks up the first rows, to keep the
+// CPU use of a search low. It waits until the search has finished its own
+// lookups, so the same result is not fetched twice.
+func (m *Model) lookUpSelectedDetails() tea.Cmd {
+	v, ok := m.selectedVideo()
+	if !ok || v.Detailed || !m.metadataDone || m.detailsAsked[v.ID] {
+		return nil
+	}
+	if m.detailsAsked == nil {
+		m.detailsAsked = map[string]bool{}
+	}
+	m.detailsAsked[v.ID] = true
+	ctx, generation, loc := m.ctx, m.generation, m.locale()
+	return func() tea.Msg {
+		var got media.Video
+		_ = youtube.FetchDetailsBatch(ctx, []media.Video{v}, loc, func(d media.Video) { got = d })
+		if got.ID == "" {
+			return nil
+		}
+		return detailsLoadedMsg{generation: generation, video: got}
+	}
+}
+
+func (m *Model) scheduleThumbnailLoad() tea.Cmd {
 	v, ok := m.selectedVideo()
 	if ok && m.thumbLoadingID == v.ID && m.thumbCancel != nil {
 		return nil

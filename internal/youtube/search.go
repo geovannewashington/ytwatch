@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/geovannewashington/ytwatch/internal/locale"
@@ -32,7 +33,15 @@ const (
 	// A filtered search is one query on the results page.
 	filteredResultCount   = 50
 	filteredPlaylistCount = 30
-	metadataWorkers       = 4
+
+	// Detail lookups are the main CPU cost of a search: every yt-dlp run
+	// starts Python and loads all extractors. So they are batched, run by few
+	// workers at a low priority, and done up front only for the first rows;
+	// the interface asks for the rest when a row is selected.
+	metadataWorkers = 2
+	detailBatchSize = 5
+	detailBatchWait = 150 * time.Millisecond
+	eagerVideos     = 20
 )
 
 type Event struct {
@@ -179,47 +188,78 @@ func Search(ctx context.Context, query string, filters Filters, loc locale.Local
 
 // startDetailWorkers starts the bounded pool that looks up richer metadata for
 // results: stream status, Shorts, description and age. Jobs on live are served
-// first. The pool ends when both channels are closed and empty.
+// first, and jobs are taken in batches that share one yt-dlp run. The pool ends
+// when both channels are closed and empty.
 func startDetailWorkers(ctx context.Context, regularJobs, liveJobs <-chan media.Video, loc locale.Locale, emit func(Event)) *sync.WaitGroup {
 	var workers sync.WaitGroup
 	for i := 0; i < metadataWorkers; i++ {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			regular := regularJobs
-			live := liveJobs
-			for regular != nil || live != nil {
-				// Prefer live-search candidates so their status is resolved early.
-				select {
-				case v, ok := <-live:
-					if !ok {
-						live = nil
-						continue
-					}
-					resolveDetails(ctx, v, loc, emit)
-					continue
-				default:
-				}
-				select {
-				case <-ctx.Done():
+			regular, live := regularJobs, liveJobs
+			for {
+				batch := collectBatch(ctx, &regular, &live)
+				if len(batch) == 0 {
 					return
-				case v, ok := <-live:
-					if !ok {
-						live = nil
-					} else {
-						resolveDetails(ctx, v, loc, emit)
-					}
-				case v, ok := <-regular:
-					if !ok {
-						regular = nil
-					} else {
-						resolveDetails(ctx, v, loc, emit)
-					}
 				}
+				_ = FetchDetailsBatch(ctx, batch, loc, func(v media.Video) {
+					if ctx.Err() == nil {
+						emit(Event{Kind: EventDetails, Video: v})
+					}
+				})
 			}
 		}()
 	}
 	return &workers
+}
+
+// collectBatch waits for one job, then gathers more for a short time, up to
+// detailBatchSize. A channel that is closed is set to nil. It returns nothing
+// when there is no more work or ctx ends.
+func collectBatch(ctx context.Context, regular, live *<-chan media.Video) []media.Video {
+	var batch []media.Video
+	take := func(v media.Video, ok bool, from *<-chan media.Video) {
+		if !ok {
+			*from = nil
+			return
+		}
+		batch = append(batch, v)
+	}
+	// Prefer live-search candidates so their status is resolved early.
+	for len(batch) == 0 {
+		if *regular == nil && *live == nil {
+			return nil
+		}
+		select {
+		case v, ok := <-*live:
+			take(v, ok, live)
+			continue
+		default:
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case v, ok := <-*live:
+			take(v, ok, live)
+		case v, ok := <-*regular:
+			take(v, ok, regular)
+		}
+	}
+	timer := time.NewTimer(detailBatchWait)
+	defer timer.Stop()
+	for len(batch) < detailBatchSize && (*regular != nil || *live != nil) {
+		select {
+		case <-ctx.Done():
+			return batch
+		case <-timer.C:
+			return batch
+		case v, ok := <-*live:
+			take(v, ok, live)
+		case v, ok := <-*regular:
+			take(v, ok, regular)
+		}
+	}
+	return batch
 }
 
 // runQuery runs one yt-dlp search and streams its results. source is a
@@ -259,6 +299,7 @@ func runQuery(
 	if err := cmd.Start(); err != nil {
 		return queryResult{err: fmt.Errorf("start yt-dlp: %w", err)}
 	}
+	lowPriority(cmd)
 
 	rows := 0
 	scanner := bufio.NewScanner(stdout)
@@ -295,7 +336,7 @@ func runQuery(
 				case liveJobs <- video:
 				case <-ctx.Done():
 				}
-			} else {
+			} else if position < eagerVideos {
 				select {
 				case regularJobs <- video:
 				case <-ctx.Done():
@@ -361,6 +402,7 @@ func runPlaylistQuery(
 	if err := cmd.Start(); err != nil {
 		return queryResult{err: fmt.Errorf("start yt-dlp: %w", err)}
 	}
+	lowPriority(cmd)
 
 	rows := 0
 	scanner := bufio.NewScanner(stdout)
@@ -398,73 +440,115 @@ func runPlaylistQuery(
 	return queryResult{rows: rows}
 }
 
-func resolveDetails(ctx context.Context, video media.Video, loc locale.Locale, emit func(Event)) {
-	if ctx.Err() != nil {
-		return
-	}
-	details, err := FetchDetails(ctx, video, loc)
-	if err != nil {
-		return
-	}
-	select {
-	case <-ctx.Done():
-	default:
-		emit(Event{Kind: EventDetails, Video: details})
-	}
-}
-
 // playlistPreviewVideos is how many videos a playlist lookup lists.
 const playlistPreviewVideos = 3
 
-func FetchDetails(parent context.Context, base media.Video, loc locale.Locale) (media.Video, error) {
-	url := base.CanonicalURL()
-	if url == "" {
-		return base, errors.New("result has no usable URL")
+// FetchDetailsBatch looks up the details of videos with as few yt-dlp runs as
+// possible (one for the videos, one for the playlists) and calls found for
+// each one as soon as it arrives. It returns an error only when yt-dlp could
+// not run or gave nothing.
+func FetchDetailsBatch(parent context.Context, videos []media.Video, loc locale.Locale, found func(media.Video)) error {
+	var singles, playlists []media.Video
+	for _, v := range videos {
+		switch {
+		case v.CanonicalURL() == "":
+		case v.IsPlaylist():
+			playlists = append(playlists, v)
+		default:
+			singles = append(singles, v)
+		}
 	}
-	ctx, cancel := context.WithTimeout(parent, 9*time.Second)
+	var firstErr error
+	for _, group := range [][]media.Video{singles, playlists} {
+		if len(group) == 0 {
+			continue
+		}
+		if err := fetchGroup(parent, group, loc, found); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+// fetchGroup runs yt-dlp once for videos that are all playlists or all not.
+func fetchGroup(parent context.Context, group []media.Video, loc locale.Locale, found func(media.Video)) error {
+	ctx, cancel := context.WithTimeout(parent, 9*time.Second+time.Duration(len(group)-1)*6*time.Second)
 	defer cancel()
 
+	playlist := group[0].IsPlaylist()
 	args := []string{
 		"--dump-single-json", "--no-warnings", "--no-progress", "--skip-download",
-		"--no-playlist", "--ignore-no-formats-error",
-		"--socket-timeout", "6", "--extractor-retries", "1", "--retries", "1", url,
+		"--no-playlist", "--ignore-no-formats-error", "--ignore-errors",
+		"--socket-timeout", "6", "--extractor-retries", "1", "--retries", "1",
 	}
-	if base.IsPlaylist() {
+	if playlist {
 		// A flat lookup of the first videos is quick and still reports the
 		// playlist's size, update date and description.
 		args = []string{
-			"--flat-playlist", "--dump-single-json", "--no-warnings", "--no-progress",
+			"--flat-playlist", "--dump-single-json", "--no-warnings", "--no-progress", "--ignore-errors",
 			"--playlist-end", strconv.Itoa(playlistPreviewVideos),
-			"--socket-timeout", "6", "--extractor-retries", "1", "--retries", "1", url,
+			"--socket-timeout", "6", "--extractor-retries", "1", "--retries", "1",
 		}
 	}
 	// Only metadata is wanted, not streams, so the player scripts are skipped.
 	// The fields used are the same without them, and each lookup takes about
 	// half the time and CPU. A playlist lookup does not use the player.
 	var youtubeArgs []string
-	if !base.IsPlaylist() {
+	if !playlist {
 		youtubeArgs = []string{"player_skip=js,configs", "player_client=web"}
 	}
 	args = append(loc.YtDlpArgs(youtubeArgs...), args...)
+	byID := make(map[string]media.Video, len(group))
+	for _, v := range group {
+		byID[v.ID] = v
+		args = append(args, v.CanonicalURL())
+	}
 	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start yt-dlp: %w", err)
+	}
+	lowPriority(cmd)
+
+	got := 0
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
+	for scanner.Scan() {
+		var details media.Video
+		if err := json.Unmarshal(scanner.Bytes(), &details); err != nil {
+			continue
+		}
+		base, ok := byID[details.ID]
+		if !ok {
+			continue
+		}
+		got++
+		found(media.MergeDetails(base, details))
+	}
+	waitErr := cmd.Wait()
+	if got == 0 {
 		if ctx.Err() != nil {
-			return base, ctx.Err()
+			return ctx.Err()
 		}
-		message := lastUsefulLine(stderr.String())
-		if message == "" {
-			return base, err
+		if message := lastUsefulLine(stderr.String()); message != "" {
+			return errors.New(message)
 		}
-		return base, errors.New(message)
+		return waitErr
 	}
-	var details media.Video
-	if err := json.Unmarshal(stdout.Bytes(), &details); err != nil {
-		return base, err
+	return nil
+}
+
+// lowPriority makes the yt-dlp process nicer to the rest of the system, so the
+// interface and other programs stay smooth during a search.
+func lowPriority(cmd *exec.Cmd) {
+	if cmd.Process != nil {
+		_ = syscall.Setpriority(syscall.PRIO_PROCESS, cmd.Process.Pid, 10)
 	}
-	return media.MergeDetails(base, details), nil
 }
 
 func lastUsefulLine(value string) string {

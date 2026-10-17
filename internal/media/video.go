@@ -46,6 +46,10 @@ type Video struct {
 	PlaylistCount int             `json:"playlist_count"`
 	ModifiedDate  string          `json:"modified_date"`
 	Entries       []PlaylistEntry `json:"entries"`
+
+	// Detailed is set once a detail lookup has been merged in. Search results
+	// start without it.
+	Detailed bool `json:"-"`
 }
 
 // ThumbnailRef is one thumbnail size of a result.
@@ -329,6 +333,7 @@ func compactCount(n int64) string {
 // MergeDetails overlays richer metadata onto a flat search result without
 // replacing useful fields with zero values from partial extractor output.
 func MergeDetails(base, details Video) Video {
+	base.Detailed = true
 	if details.ID != "" {
 		base.ID = details.ID
 	}
