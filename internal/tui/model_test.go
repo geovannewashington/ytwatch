@@ -941,3 +941,20 @@ func TestALeadingSlashIsNotPartOfTheSearch(t *testing.T) {
 		t.Fatalf("query = %q", m.query)
 	}
 }
+
+func TestWideTerminalKeepsTheLayoutWidthAndCentersIt(t *testing.T) {
+	m := New("test")
+	m.Update(tea.WindowSizeMsg{Width: 300, Height: 40})
+	if m.width != maxWidth || m.margin != (300-maxWidth)/2 {
+		t.Fatalf("width=%d margin=%d", m.width, m.margin)
+	}
+	for _, line := range strings.Split(m.View(), "\n") {
+		if !strings.HasPrefix(line, strings.Repeat(" ", m.margin)) {
+			t.Fatalf("line is not indented by the margin: %q", line)
+		}
+	}
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	if m.width != 120 || m.margin != 0 {
+		t.Fatalf("a terminal under the limit has no margin: width=%d margin=%d", m.width, m.margin)
+	}
+}

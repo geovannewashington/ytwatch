@@ -35,6 +35,7 @@ const (
 	minWidth  = 80
 	minHeight = 18
 	wideWidth = 100 // below this the preview pane is hidden
+	maxWidth  = 160 // wider terminals get empty margins, so the layout keeps its shape
 )
 
 type searchStartedMsg struct {
@@ -123,6 +124,7 @@ type Model struct {
 	historyPos   int    // index in the history while browsing it with Up/Down
 	historyDraft string // what was typed before browsing
 	showHelp     bool
+	margin       int  // empty columns left of the layout when the terminal is wider than maxWidth
 	confirmQuit  bool // waiting for y/n after q or Ctrl+C
 	undo         *undoAction
 
@@ -412,7 +414,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ticking = false // Update starts the next tick if it is still needed
 		return m, nil
 	case tea.WindowSizeMsg:
-		m.width, m.height = msg.Width, msg.Height
+		m.width, m.height = min(msg.Width, maxWidth), msg.Height
+		m.margin = (msg.Width - m.width) / 2
 		if m.width < wideWidth {
 			m.focus = resultsPane
 		}
@@ -1295,7 +1298,7 @@ func (m *Model) showSelectedThumbnail() {
 		m.overlay.Remove()
 		return
 	}
-	if !m.overlay.Show(path, leftWidth+2, y, rightWidth, thumbRows) {
+	if !m.overlay.Show(path, m.margin+leftWidth+2, y, rightWidth, thumbRows) {
 		m.status = "Thumbnail overlay unavailable" + noteMark + "check ueberzugpp or set [preview] output in config.toml"
 	}
 }
@@ -1470,7 +1473,16 @@ func tickAnimation() tea.Cmd {
 	return tea.Tick(animationInterval, func(time.Time) tea.Msg { return animationMsg{} })
 }
 
+// View draws the interface, centered when the terminal is wider than maxWidth.
 func (m *Model) View() string {
+	view := m.layout()
+	if m.margin > 0 {
+		view = lipgloss.NewStyle().PaddingLeft(m.margin).Render(view)
+	}
+	return view
+}
+
+func (m *Model) layout() string {
 	if m.width < 1 || m.height < 1 {
 		return "ytwatch | starting..."
 	}
