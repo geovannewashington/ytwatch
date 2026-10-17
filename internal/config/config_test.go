@@ -248,3 +248,18 @@ func TestHistoryLimitsHaveAnUpperBound(t *testing.T) {
 		t.Errorf("the largest allowed values were rejected: %v", err)
 	}
 }
+
+func TestParseUIAnimations(t *testing.T) {
+	if Default().UI.Animations != "full" {
+		t.Fatalf("default = %q", Default().UI.Animations)
+	}
+	for _, value := range []string{"full", "minimal", "off"} {
+		cfg, err := Parse("[ui]\nanimations = \"" + value + "\"\n")
+		if err != nil || cfg.UI.Animations != value {
+			t.Errorf("%s: %v %q", value, err, cfg.UI.Animations)
+		}
+	}
+	if _, err := Parse("[ui]\nanimations = \"lots\"\n"); err == nil {
+		t.Error("an unknown level should be rejected")
+	}
+}

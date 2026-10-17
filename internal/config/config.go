@@ -29,6 +29,7 @@ type Config struct {
 	Preview  Preview
 	History  History
 	Cache    Cache
+	UI       UI
 	Search   Search
 	// Links are the programs that open description links, tried in the order
 	// they appear in the file. See LinkHandler.
@@ -83,6 +84,12 @@ type History struct {
 	Enabled    bool
 	MaxAgeDays int
 	MaxEntries int
+}
+
+// UI configures how the interface moves. Animations is "full" (the default),
+// "minimal" (only the ones that show progress) or "off".
+type UI struct {
+	Animations string
 }
 
 // Cache limits the thumbnail cache. Files older than MaxAgeDays are deleted
@@ -155,6 +162,7 @@ func Default() Config {
 		Download: Download{Dir: "~/Downloads/ytwatch"},
 		History:  History{Enabled: true, MaxAgeDays: 30, MaxEntries: 100},
 		Cache:    Cache{MaxAgeDays: 7, MaxSizeMB: 100},
+		UI:       UI{Animations: "full"},
 	}
 }
 
@@ -279,6 +287,16 @@ func (c *Config) set(section, key, raw string) error {
 		c.History.MaxAgeDays, err = parseBoundedInt(raw, 36500) // about 100 years
 	case "history.max_entries":
 		c.History.MaxEntries, err = parseBoundedInt(raw, 100000)
+	case "ui.animations":
+		var value string
+		if value, err = parseString(raw); err == nil {
+			switch value = strings.ToLower(strings.TrimSpace(value)); value {
+			case "full", "minimal", "off":
+				c.UI.Animations = value
+			default:
+				err = fmt.Errorf("%q is not one of full, minimal, off", value)
+			}
+		}
 	case "cache.max_age_days":
 		c.Cache.MaxAgeDays, err = parseBoundedInt(raw, 36500)
 	case "cache.max_size_mb":

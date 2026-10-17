@@ -94,7 +94,7 @@ type detailsLoadedMsg struct {
 const noteMark = "\x1f"
 
 // undoNote is the note that follows a play or download status.
-const undoNote = noteMark + "u, Esc or Ctrl+C: undo"
+const undoNote = noteMark + "u to undo"
 
 // undoWindow is how long u can still cancel the last play or download.
 const undoWindow = 10 * time.Second
@@ -136,8 +136,11 @@ type Model struct {
 	historyPos   int    // index in the history while browsing it with Up/Down
 	historyDraft string // what was typed before browsing
 	showHelp     bool
-	margin       int  // empty columns left of the layout when the terminal is wider than maxWidth
-	confirmQuit  bool // waiting for y/n after q or Ctrl+C
+	animations   int // animOff, animMinimal or animFull, see fx.go
+	fx           fxState
+	clock        func() time.Time // replaces time.Now in tests
+	margin       int              // empty columns left of the layout when the terminal is wider than maxWidth
+	confirmQuit  bool             // waiting for y/n after q or Ctrl+C
 	undo         *undoAction
 
 	filters      youtube.Filters // applied to every search
@@ -221,6 +224,7 @@ func New(initialQuery string) *Model {
 		cfg:            config.Default(),
 		width:          100, height: 30,
 		historyPos: -1,
+		animations: animFull,
 	}
 	if m.query == "" {
 		m.searchMode = true
@@ -235,6 +239,7 @@ func (m *Model) SetConfig(cfg config.Config) {
 	m.cfg = cfg
 	m.audioOnly = cfg.General.AudioOnly
 	m.quality = quality.Normalize(cfg.General.Quality)
+	m.animations = animationLevel(cfg.UI.Animations)
 	m.overlay.Configure(cfg.Preview.Output)
 	m.history = nil
 	if cfg.History.Enabled {
@@ -315,6 +320,7 @@ func (m *Model) startStream(status string, run func(ctx context.Context, emit fu
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.searchCancel = cancel
 	m.detailsAsked = map[string]bool{}
+	m.resetArrivals()
 	m.generation++
 	generation := m.generation
 	m.endVisual()
@@ -414,15 +420,25 @@ func waitSearchEvent(generation int, events <-chan youtube.Event) tea.Cmd {
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	model, cmd := m.update(msg)
 	m.syncMarquee()
+	m.fxObserve()
 	if !m.ticking && m.needsTick() {
 		m.ticking = true
 		cmd = tea.Batch(cmd, tickMarquee())
+	}
+	if tick := m.fxSchedule(); tick != nil {
+		cmd = tea.Batch(cmd, tick)
 	}
 	return model, cmd
 }
 
 func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case undoExpiredMsg:
+		return m, nil // the redraw is all that is needed
+	case fxMsg:
+		m.fx.ticking = false // Update starts the next tick if an effect still runs
+		m.fxExpire()
+		return m, nil
 	case marqueeMsg:
 		m.marqueeStep++
 		m.ticking = false // Update starts the next tick if it is still needed
@@ -623,7 +639,11 @@ func (m *Model) insertResult(v media.Video, rank int) []tea.Cmd {
 	}
 	m.items = slices.Insert(m.items, at, v)
 	m.ranks = slices.Insert(m.ranks, at, rank)
+	m.markArrived(v.ID)
 	if len(m.items) == 1 {
+		if m.animations == animFull && m.width >= wideWidth && len(m.parents) == 0 {
+			m.fx.splitAt = m.now() // the preview pane opens
+		}
 		m.selected, m.top = 0, 0
 		return []tea.Cmd{m.scheduleThumbnail()}
 	}
@@ -1347,7 +1367,7 @@ func loadThumbnail(ctx context.Context, v media.Video, sequence int) tea.Cmd {
 }
 
 func (m *Model) showSelectedThumbnail() {
-	if m.width < wideWidth {
+	if m.width < wideWidth || m.splitAnimating() {
 		m.overlay.Remove()
 		return
 	}
@@ -1457,7 +1477,7 @@ func (m *Model) startPlayer(videos []media.Video) tea.Cmd {
 	if !videos[0].IsCurrentlyLive() || len(videos) > 1 {
 		m.status += undoNote
 	}
-	cmds := []tea.Cmd{waitForPlayer(cmd, ids)}
+	cmds := []tea.Cmd{waitForPlayer(cmd, ids), undoExpiry()}
 	if !m.animating {
 		m.animating = true
 		cmds = append(cmds, tickAnimation())
@@ -1523,12 +1543,12 @@ func (m *Model) startDownloads(videos []media.Video) tea.Cmd {
 	}
 	m.undo = &undoAction{label: "download", until: time.Now().Add(undoWindow), cancel: stop}
 	if len(cmds) == 1 {
-		m.status = "⬇ Downloading" + noteMark + clean(last.Title)
+		m.status = "Downloading" + noteMark + clean(last.Title)
 	} else {
-		m.status = fmt.Sprintf("⬇ Downloading %d videos, one after the other", len(cmds))
+		m.status = fmt.Sprintf("Downloading %d videos", len(cmds))
 	}
 	m.status += undoNote
-	return tea.Sequence(cmds...)
+	return tea.Batch(tea.Sequence(cmds...), undoExpiry())
 }
 
 func waitForPlayer(cmd *player.Process, ids []string) tea.Cmd {
@@ -1608,6 +1628,9 @@ func (m *Model) renderHeader() string {
 	default:
 		searchLine += truncate(m.query, max(10, m.width-8))
 	}
+	if m.searching && !m.searchMode && m.animations != animOff {
+		searchLine += " " + searchStyle.Render(spinnerFrame(m.now()))
+	}
 	keys := m.keyHints()
 	center := func(s string) string {
 		return lipgloss.PlaceHorizontal(m.width, lipgloss.Center, s)
@@ -1633,6 +1656,16 @@ func (m *Model) renderBody() string {
 	if len(m.items) == 0 && len(m.parents) == 0 {
 		full := m.width - 4
 		return activePanelStyle.Width(full + padding).Height(height).Render(m.renderResultLines(full, height))
+	}
+
+	if m.splitAnimating() {
+		// The preview opens from the right: its share grows from nothing.
+		opening := int(m.splitProgress() * float64(previewWidth))
+		if opening < 6 {
+			full := m.width - 4
+			return activePanelStyle.Width(full + padding).Height(height).Render(m.renderResultLines(full, height))
+		}
+		resultsWidth, previewWidth = m.width-8-opening, opening
 	}
 
 	leftStyle, rightStyle := panelStyle, panelStyle
@@ -1664,6 +1697,9 @@ func (m *Model) renderResultLines(width, height int) string {
 
 		badge := ""
 		if label, style := badgeInfo(v); label != "" {
+			if label == "LIVE" && m.liveDim() {
+				style = metaStyle
+			}
 			badge = style.Render(label)
 		}
 		leftWidth := width
@@ -1678,6 +1714,11 @@ func (m *Model) renderResultLines(width, height int) string {
 			titleStyle = selectedTitleStyle
 			if !selected {
 				cursor = "┃ "
+			}
+		}
+		if !selected && !m.inSelection(i) {
+			if phase, fading := m.rowFade(v.ID); fading {
+				titleStyle = fadeStyles()[phase+1]
 			}
 		}
 		marker := titleStyle.Render(cursor)
@@ -1911,16 +1952,22 @@ func (m *Model) renderPreview(width, height int) string {
 	return strings.Join(lines, "\n")
 }
 func (m *Model) renderFooter() string {
-	status := m.status
+	status := m.dressUndo(m.status)
 	prefix := ""
 	if len(m.playing) > 0 {
 		prefix = equalizer(m.spinnerFrame, 3) + " "
 		status = "Playing " + strconv.Itoa(len(m.playing)) + " video(s)"
 	}
+	if len(m.downloading) > 0 && len(m.playing) == 0 && m.animations != animOff {
+		prefix = searchStyle.Render(spinnerFrame(m.now())) + " "
+	}
 	if m.visual {
 		status = m.visualStatus()
 	}
 	style := statusStyle
+	if phase := m.flashPhase(); phase < 2 {
+		style = fadeStyles()[phase+1]
+	}
 	if m.searchError != "" && len(m.items) == 0 {
 		status = m.searchError
 		style = errorStyle
@@ -2342,6 +2389,8 @@ func inputParts(text string, cursor int) (before, under, after []rune) {
 // after noteMark) dimmed, and pads the result to width.
 func renderStatus(status string, style lipgloss.Style, width int) string {
 	message, note, hasNote := strings.Cut(status, noteMark)
+	// More notes, such as the undo hint after a title, are joined by dots.
+	note = strings.ReplaceAll(note, noteMark, " · ")
 	message = truncate(message, width)
 	used := lipgloss.Width(message)
 	out := style.Render(message)

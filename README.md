@@ -147,6 +147,9 @@ enabled = true
 max_age_days = 30
 max_entries = 100
 
+[ui]
+animations = "full"          # full, minimal (progress only) or off
+
 [cache]                      # thumbnails, cleaned each time ytwatch starts
 max_age_days = 7
 max_size_mb = 100
