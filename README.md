@@ -2,7 +2,7 @@
 
 <img src="docs/logo/wordmark.svg" width="380" alt="ytwatch">
 
-**Search YouTube from your terminal. Watch on purpose.**
+Search YouTube from your terminal. Watch on purpose.
 
 [![Go](https://img.shields.io/badge/go-1.23+-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
