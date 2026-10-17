@@ -186,6 +186,12 @@ func (v Video) Kind() Kind {
 	}
 }
 
+// DurationKnown reports whether DurationText has a real length (or a live or
+// upcoming label) to show, and not "duration unknown".
+func (v Video) DurationKnown() bool {
+	return v.IsCurrentlyLive() || v.IsUpcoming() || v.Duration > 0 || v.DurationString != ""
+}
+
 func (v Video) DurationText() string {
 	if v.IsCurrentlyLive() {
 		if v.ConcurrentViewers > 0 {

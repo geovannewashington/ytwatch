@@ -1570,6 +1570,29 @@ func (m *Model) layout() string {
 	return lipgloss.JoinVertical(lipgloss.Left, m.renderHeader(), m.renderBody(), m.renderFooter())
 }
 
+// keyHints is the line of keys under the search line. It shows the keys that
+// matter for what is selected; the help screen (?) has all of them.
+func (m *Model) keyHints() string {
+	v, hasSelection := m.selectedVideo()
+	switch {
+	case m.searchMode && m.query == "" && len(m.items) == 0:
+		return "Enter search · Up/Down past searches · Esc, then ? for help"
+	case m.searchMode:
+		return "Enter search · Esc cancel · Up/Down past searches · Ctrl+U clear"
+	case m.visual:
+		return "j/k extend · Enter play · d download · Esc cancel"
+	case len(m.parents) > 0 && !hasSelection:
+		return "Esc back to results · / search · ? help"
+	case len(m.parents) > 0:
+		return "j/k move · Enter play · d download · V select · Esc back · ? help"
+	case !hasSelection:
+		return "/ search · f filters · ? help · q quit"
+	case v.IsPlaylist():
+		return "j/k move · Enter play all · B browse · V select · / search · ? help"
+	}
+	return "j/k move · Enter play · d download · V select · / search · f filters · ? help"
+}
+
 func (m *Model) renderHeader() string {
 	brand := titleStyle.Render("YTWATCH") + searchStyle.Render(" ✦ ") + taglineStyle.Render("Search YouTube from your terminal and play in mpv")
 	searchLine := searchStyle.Render("> ")
@@ -1585,13 +1608,7 @@ func (m *Model) renderHeader() string {
 	default:
 		searchLine += truncate(m.query, max(10, m.width-8))
 	}
-	keys := "j/k move · h/l panes · Enter play · / search · f filters · ? help · q quit"
-	if len(m.parents) > 0 && !m.searchMode {
-		keys = "j/k move · Enter play · V select · Esc back to results · ? help · q quit"
-	}
-	if m.searchMode {
-		keys = "Enter search · Esc cancel · Up/Down past searches · arrows move · Ctrl+U clear"
-	}
+	keys := m.keyHints()
 	center := func(s string) string {
 		return lipgloss.PlaceHorizontal(m.width, lipgloss.Center, s)
 	}
@@ -1611,6 +1628,11 @@ func (m *Model) renderBody() string {
 	if m.width < wideWidth {
 		content := m.renderResultLines(resultsWidth, height)
 		return activePanelStyle.Width(resultsWidth + padding).Height(height).Render(content)
+	}
+	// Without results there is nothing to preview, so one pane uses the width.
+	if len(m.items) == 0 && len(m.parents) == 0 {
+		full := m.width - 4
+		return activePanelStyle.Width(full + padding).Height(height).Render(m.renderResultLines(full, height))
 	}
 
 	leftStyle, rightStyle := panelStyle, panelStyle
@@ -1681,7 +1703,10 @@ func (m *Model) renderResultLines(width, height int) string {
 		}
 		lines = append(lines, line)
 
-		meta := clean(v.ChannelName()) + " · " + v.DurationText()
+		meta := clean(v.ChannelName())
+		if text, ok := durationPart(v); ok {
+			meta += " · " + text
+		}
 		if v.IsPlaylist() {
 			meta = strings.Join(append([]string{clean(v.ChannelName()), "playlist"}, playlistFacts(v)...), " · ")
 		} else if v.IsCurrentlyLive() {
@@ -1724,6 +1749,8 @@ func (m *Model) renderResultLines(width, height int) string {
 func (m *Model) renderEmptyList(width, height int) []string {
 	message, mood := "Press / to search YouTube", moodIdle
 	switch {
+	case m.searchMode:
+		message = "Type your search and press Enter"
 	case m.searchError != "":
 		message, mood = "Search failed: "+m.searchError, moodSad
 	case m.searching && len(m.parents) > 0:
@@ -1825,7 +1852,9 @@ func (m *Model) renderPreview(width, height int) string {
 		if v.IsCurrentlyLive() {
 			stats = append(stats, "streaming now")
 		} else {
-			stats = append(stats, v.DurationText())
+			if text, ok := durationPart(v); ok {
+				stats = append(stats, text)
+			}
 		}
 		if v.ViewCount > 0 && !v.IsCurrentlyLive() {
 			stats = append(stats, v.ViewsText())
@@ -2209,6 +2238,16 @@ func wrapLines(s string, width, maxLines int) []string {
 // joiners, variation selectors) or that would break the layout (control
 // characters). Such characters make borders drift while scrolling.
 func clean(s string) string { return sanitize(s) }
+
+// durationPart is the length of v for a row or the preview. A result whose
+// details have not arrived yet has no length to show, which is not the same as
+// a result with an unknown length.
+func durationPart(v media.Video) (string, bool) {
+	if v.DurationKnown() || v.Detailed {
+		return v.DurationText(), true
+	}
+	return "", false
+}
 
 func sanitize(s string) string {
 	return strings.Map(func(r rune) rune {

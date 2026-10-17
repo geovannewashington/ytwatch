@@ -958,3 +958,48 @@ func TestWideTerminalKeepsTheLayoutWidthAndCentersIt(t *testing.T) {
 		t.Fatalf("a terminal under the limit has no margin: width=%d margin=%d", m.width, m.margin)
 	}
 }
+
+func TestStartScreenHasOnePaneAndSaysTypeToSearch(t *testing.T) {
+	m := New("")
+	m.width, m.height = 120, 30
+	out := m.View()
+	if strings.Contains(out, "PREVIEW") {
+		t.Fatalf("the start screen should not show a preview pane:\n%s", out)
+	}
+	if !strings.Contains(out, "Type your search and press Enter") {
+		t.Fatalf("the start screen should say to type:\n%s", out)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if out := m.View(); !strings.Contains(out, "Press / to search YouTube") {
+		t.Fatalf("after Esc the screen should say to press /:\n%s", out)
+	}
+}
+
+func TestKeyHintsFollowTheSelection(t *testing.T) {
+	m := New("test")
+	m.items = []media.Video{{ID: "video0001", Title: "One"}, playlistVideo()}
+	m.ranks = []int{0, 10}
+	if hints := m.keyHints(); !strings.Contains(hints, "d download") || strings.Contains(hints, "B browse") {
+		t.Fatalf("video hints: %q", hints)
+	}
+	m.selected = 1
+	if hints := m.keyHints(); !strings.Contains(hints, "Enter play all") || !strings.Contains(hints, "B browse") {
+		t.Fatalf("playlist hints: %q", hints)
+	}
+	m.startVisual()
+	if hints := m.keyHints(); !strings.Contains(hints, "Esc cancel") {
+		t.Fatalf("visual hints: %q", hints)
+	}
+}
+
+func TestDurationIsLeftOutUntilDetailsArrive(t *testing.T) {
+	if _, ok := durationPart(media.Video{ID: "video0001"}); ok {
+		t.Error("a result without details should not claim an unknown duration")
+	}
+	if text, ok := durationPart(media.Video{ID: "video0001", Detailed: true}); !ok || text != "duration unknown" {
+		t.Errorf("a detailed result with no length: %q %v", text, ok)
+	}
+	if text, ok := durationPart(media.Video{ID: "video0001", Duration: 65}); !ok || text != "1:05" {
+		t.Errorf("a known length: %q %v", text, ok)
+	}
+}
