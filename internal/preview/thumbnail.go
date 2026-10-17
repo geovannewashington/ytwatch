@@ -187,7 +187,24 @@ type Overlay struct {
 	stdin  io.WriteCloser
 	done   chan error
 	active bool
+
+	visible bool       // an image was added and not removed since
+	shown   placement  // what was added last; valid while visible
+	pending *placement // newest request not sent yet
+	timer   *time.Timer
+	lastAdd time.Time
 }
+
+type placement struct {
+	path       string
+	x, y, w, h int
+}
+
+// addGap is the shortest time between two add commands. ueberzugpp makes a
+// new window for every add, so adds sent at key repeat speed (30 a second)
+// pile up in its queue and the image lags, flickers or ends misplaced.
+// Requests in between are dropped; the newest one is always sent.
+const addGap = 150 * time.Millisecond
 
 // Configure applies the [preview] output setting: "auto", "off", or an
 // ueberzugpp output such as "x11".
@@ -214,7 +231,7 @@ func (o *Overlay) startLocked() bool {
 			if o.stdin != nil {
 				_ = o.stdin.Close()
 			}
-			o.cmd, o.stdin, o.done, o.active = nil, nil, nil, false
+			o.cmd, o.stdin, o.done, o.active, o.visible = nil, nil, nil, false, false
 		default:
 			return true
 		}
@@ -243,13 +260,18 @@ func (o *Overlay) startLocked() bool {
 	return true
 }
 
-func (o *Overlay) send(payload map[string]any) bool {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if !o.startLocked() || o.stdin == nil {
-		return false
+// sendLocked writes payload to ueberzugpp. A failed write means the process
+// died, so it is started again once and the write is retried.
+func (o *Overlay) sendLocked(payload map[string]any) bool {
+	for range 2 {
+		if !o.startLocked() || o.stdin == nil {
+			return false
+		}
+		if o.writeLocked(payload) {
+			return true
+		}
 	}
-	return o.writeLocked(payload)
+	return false
 }
 
 func (o *Overlay) writeLocked(payload map[string]any) bool {
@@ -265,32 +287,82 @@ func (o *Overlay) writeLocked(payload map[string]any) bool {
 		if o.cmd != nil && o.cmd.Process != nil {
 			_ = o.cmd.Process.Kill()
 		}
-		o.active = false
+		o.active, o.visible = false, false
 		o.cmd, o.stdin, o.done = nil, nil, nil
 		return false
 	}
 	return true
 }
 
+// Show queues the image; see addGap. It returns false when ueberzugpp cannot
+// be started.
 func (o *Overlay) Show(path string, x, y, width, height int) bool {
 	if path == "" || width < 8 || height < 3 {
 		o.Remove()
 		return false
 	}
-	// Adding the same identifier updates the layer without a remove/add flash.
-	return o.send(map[string]any{
-		"action": "add", "identifier": "ytwatch-preview", "path": path,
-		"x": x, "y": y, "max_width": width, "max_height": height,
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if !o.startLocked() {
+		return false
+	}
+	o.pending = &placement{path, x, y, width, height}
+	if o.timer != nil {
+		return true // the timer will send the newest request
+	}
+	if wait := addGap - time.Since(o.lastAdd); wait > 0 {
+		o.timer = time.AfterFunc(wait, o.flush)
+		return true
+	}
+	o.flushLocked()
+	return true
+}
+
+func (o *Overlay) flush() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.timer = nil
+	o.flushLocked()
+}
+
+func (o *Overlay) flushLocked() {
+	p := o.pending
+	o.pending = nil
+	if p == nil || (o.visible && o.shown == *p) {
+		return
+	}
+	o.lastAdd = time.Now()
+	// Adding the same identifier replaces the image without a remove.
+	o.visible = o.sendLocked(map[string]any{
+		"action": "add", "identifier": "ytwatch-preview", "path": p.path,
+		"x": p.x, "y": p.y, "max_width": p.w, "max_height": p.h,
 		"scaler": "fit_contain",
 	})
+	if o.visible {
+		o.shown = *p
+	}
+}
+
+// Invalidate makes the next Show send the image again even when it is
+// unchanged. The new add replaces the old window, so there is no gap.
+func (o *Overlay) Invalidate() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.shown = placement{}
 }
 
 func (o *Overlay) Remove() {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if !o.active || o.stdin == nil {
+	o.pending = nil
+	if o.timer != nil {
+		o.timer.Stop()
+		o.timer = nil
+	}
+	if !o.active || o.stdin == nil || !o.visible {
 		return
 	}
+	o.visible = false
 	_ = o.writeLocked(map[string]any{"action": "remove", "identifier": "ytwatch-preview"})
 }
 
@@ -309,7 +381,7 @@ func (o *Overlay) Close() {
 			_ = o.cmd.Process.Kill()
 		}
 	}
-	o.active = false
+	o.active, o.visible = false, false
 }
 
 func DescriptionSnippet(value string, maxRunes int) string {
