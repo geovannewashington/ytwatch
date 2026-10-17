@@ -28,6 +28,7 @@ type Config struct {
 	Theme    Theme
 	Preview  Preview
 	History  History
+	Cache    Cache
 	Search   Search
 	// Links are the programs that open description links, tried in the order
 	// they appear in the file. See LinkHandler.
@@ -82,6 +83,14 @@ type History struct {
 	Enabled    bool
 	MaxAgeDays int
 	MaxEntries int
+}
+
+// Cache limits the thumbnail cache. Files older than MaxAgeDays are deleted
+// every time ytwatch starts; then the oldest files go until the folder is
+// smaller than MaxSizeMB.
+type Cache struct {
+	MaxAgeDays int
+	MaxSizeMB  int
 }
 
 // Theme selects the colours. Name is a preset (see package theme) and Colors
@@ -144,6 +153,7 @@ func Default() Config {
 		Chat:     Chat{Enabled: true},
 		Download: Download{Dir: "~/Downloads/ytwatch"},
 		History:  History{Enabled: true, MaxAgeDays: 30, MaxEntries: 100},
+		Cache:    Cache{MaxAgeDays: 7, MaxSizeMB: 100},
 	}
 }
 
@@ -268,6 +278,10 @@ func (c *Config) set(section, key, raw string) error {
 		c.History.MaxAgeDays, err = parseBoundedInt(raw, 36500) // about 100 years
 	case "history.max_entries":
 		c.History.MaxEntries, err = parseBoundedInt(raw, 100000)
+	case "cache.max_age_days":
+		c.Cache.MaxAgeDays, err = parseBoundedInt(raw, 36500)
+	case "cache.max_size_mb":
+		c.Cache.MaxSizeMB, err = parseBoundedInt(raw, 100000)
 	case "chat.enabled":
 		c.Chat.Enabled, err = strconv.ParseBool(raw)
 	case "chat.workspace":

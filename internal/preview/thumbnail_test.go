@@ -5,7 +5,10 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestValidFileID(t *testing.T) {
@@ -75,4 +78,36 @@ func TestResolveOutput(t *testing.T) {
 			t.Errorf("%s: got %q, %v; want %q, %v", name, output, enabled, tc.output, tc.enabled)
 		}
 	}
+}
+
+func TestPruneRemovesOldThenOldestOverTheSizeLimit(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	write := func(name string, age time.Duration) {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, make([]byte, 100), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		when := now.Add(-age)
+		if err := os.Chtimes(path, when, when); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("expired", 10*24*time.Hour)
+	write("oldest", 3*24*time.Hour)
+	write("middle", 2*24*time.Hour)
+	write("newest", time.Hour)
+
+	prune(dir, 7*24*time.Hour, 250, now)
+
+	for name, want := range map[string]bool{"expired": false, "oldest": false, "middle": true, "newest": true} {
+		_, err := os.Stat(filepath.Join(dir, name))
+		if got := err == nil; got != want {
+			t.Errorf("%s exists = %v, want %v", name, got, want)
+		}
+	}
+}
+
+func TestPruneMissingFolderIsFine(t *testing.T) {
+	prune(filepath.Join(t.TempDir(), "none"), time.Hour, 1, time.Now())
 }

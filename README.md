@@ -146,6 +146,10 @@ enabled = true
 max_age_days = 30
 max_entries = 100
 
+[cache]                      # thumbnails, cleaned each time ytwatch starts
+max_age_days = 7
+max_size_mb = 100
+
 # Open description links with a program. The command runs without a shell,
 # and %l is the link. Links without a match open in the browser.
 [link.images]
@@ -206,7 +210,7 @@ ytwatch shows why mpv failed in the status line. Run `ytwatch doctor` first.
 | What | Where |
 |---|---|
 | Config | `~/.config/ytwatch/config.toml` |
-| Thumbnail cache | `~/.cache/ytwatch/thumbnails` |
+| Thumbnail cache | `~/.cache/ytwatch/thumbnails` (deleted after 7 days, 100 MB at most) |
 | Search history | `~/.local/state/ytwatch/history` |
 
 ytwatch stores no subscriptions or watch list. For feeds, a reader such as

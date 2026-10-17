@@ -192,6 +192,24 @@ func TestParseHistory(t *testing.T) {
 	}
 }
 
+func TestParseCache(t *testing.T) {
+	if c := Default().Cache; c.MaxAgeDays != 7 || c.MaxSizeMB != 100 {
+		t.Fatalf("defaults: %+v", c)
+	}
+	cfg, err := Parse("[cache]\nmax_age_days = 3\nmax_size_mb = 20\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := cfg.Cache; c.MaxAgeDays != 3 || c.MaxSizeMB != 20 {
+		t.Fatalf("cache: %+v", c)
+	}
+	for _, bad := range []string{"max_age_days = 0", "max_size_mb = 0", "max_size_mb = 1000000"} {
+		if _, err := Parse("[cache]\n" + bad + "\n"); err == nil {
+			t.Errorf("%q should be rejected", bad)
+		}
+	}
+}
+
 func TestParseQuality(t *testing.T) {
 	if Default().General.Quality != "best" {
 		t.Fatalf("default quality = %q", Default().General.Quality)

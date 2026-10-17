@@ -5,10 +5,12 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/geovannewashington/ytwatch/internal/config"
+	"github.com/geovannewashington/ytwatch/internal/preview"
 	"github.com/geovannewashington/ytwatch/internal/tui"
 )
 
@@ -70,6 +72,10 @@ func main() {
 		fmt.Fprintln(os.Stderr, "ytwatch: config error:", err)
 		os.Exit(1)
 	}
+
+	// Pruning reads the whole folder, so it runs in the background. It is here
+	// and not in SetConfig so tests do not touch the real cache.
+	go preview.Prune(time.Duration(cfg.Cache.MaxAgeDays)*24*time.Hour, int64(cfg.Cache.MaxSizeMB)<<20, time.Now())
 
 	model := tui.New(query)
 	model.SetConfig(cfg)

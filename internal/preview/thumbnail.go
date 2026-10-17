@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -29,6 +30,49 @@ func userCacheDir() string {
 		return os.TempDir()
 	}
 	return filepath.Join(home, ".cache")
+}
+
+// Prune deletes thumbnails older than maxAge, then the oldest ones until the
+// folder is no larger than maxBytes. Errors are ignored: a file that cannot be
+// deleted now is tried again at the next start.
+func Prune(maxAge time.Duration, maxBytes int64, now time.Time) {
+	prune(cacheDir, maxAge, maxBytes, now)
+}
+
+func prune(dir string, maxAge time.Duration, maxBytes int64, now time.Time) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	type cached struct {
+		path string
+		size int64
+		when time.Time
+	}
+	var kept []cached
+	var total int64
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		if now.Sub(info.ModTime()) > maxAge {
+			_ = os.Remove(path)
+			continue
+		}
+		kept = append(kept, cached{path, info.Size(), info.ModTime()})
+		total += info.Size()
+	}
+	sort.Slice(kept, func(i, j int) bool { return kept[i].when.Before(kept[j].when) })
+	for _, f := range kept {
+		if total <= maxBytes {
+			break
+		}
+		if os.Remove(f.path) == nil {
+			total -= f.size
+		}
+	}
 }
 
 // validFileID reports whether id is safe to use as a cache file name. The limit
@@ -69,6 +113,9 @@ func Download(ctx context.Context, v media.Video) (string, error) {
 
 	destination := filepath.Join(cacheDir, v.ID+"-"+cacheVersion+".jpg")
 	if info, err := os.Stat(destination); err == nil && info.Size() > 0 {
+		// A file in use stays young, so Prune removes unused files first.
+		now := time.Now()
+		_ = os.Chtimes(destination, now, now)
 		return destination, nil
 	}
 	var data []byte
