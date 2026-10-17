@@ -1734,7 +1734,7 @@ func (m *Model) renderPreview(width, height int) string {
 		lines = append(lines, "", subtitleStyle.Render("Select a result to inspect it."))
 	} else {
 		lines = append(lines, "")
-		lines = append(lines, lipgloss.NewStyle().Bold(true).Render(m.marqueeText(clean(v.Title), width)))
+		lines = append(lines, m.marqueeText(clean(v.Title), width))
 		lines = append(lines, metaStyle.Render(truncate(clean(v.ChannelName()), width)))
 
 		var stats []string
@@ -1920,7 +1920,6 @@ func (m *Model) renderFilters() string {
 	for _, def := range youtube.Rows {
 		height = max(height, len(def.Options))
 	}
-	chosen := lipgloss.NewStyle().Bold(true)
 	columns := make([]string, len(youtube.Rows))
 	for col, def := range youtube.Rows {
 		focused := col == m.filterCol
@@ -1939,7 +1938,7 @@ func (m *Model) renderFilters() string {
 			case i == m.filterDraft.Get(col) && focused:
 				lines = append(lines, selectedTitleStyle.Render("● "+def.Options[i]))
 			case i == m.filterDraft.Get(col):
-				lines = append(lines, chosen.Render("● "+def.Options[i]))
+				lines = append(lines, "● "+def.Options[i])
 			default:
 				lines = append(lines, helpStyle.Render("○ "+def.Options[i]))
 			}
