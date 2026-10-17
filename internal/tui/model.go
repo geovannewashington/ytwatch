@@ -187,7 +187,7 @@ func New(initialQuery string) *Model {
 		openURL:        player.OpenURL,
 		runCommand:     links.Run,
 		query:          strings.TrimSpace(initialQuery),
-		status:         "Ready",
+		status:         "",
 		thumbnailPaths: make(map[string]string),
 		thumbFailures:  make(map[string]time.Time),
 		thumbAttempts:  make(map[string]int),
@@ -817,7 +817,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		// q first closes the layer the user is in, like Esc does.
 		if m.visual {
 			m.endVisual()
-			m.status = "Ready"
+			m.status = ""
 			return nil
 		}
 		if len(m.parents) > 0 {
@@ -850,7 +850,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case "V", "shift+v":
 		if m.visual {
 			m.endVisual()
-			m.status = "Ready"
+			m.status = ""
 		} else {
 			m.startVisual()
 		}
@@ -861,7 +861,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		if m.visual {
 			m.endVisual()
-			m.status = "Ready"
+			m.status = ""
 			return nil
 		}
 		if len(m.parents) > 0 {
