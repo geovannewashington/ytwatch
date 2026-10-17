@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/geovannewashington/ytwatch/internal/config"
@@ -25,6 +26,19 @@ const mpvTitlePrefix = "ytwatch | "
 type Process struct {
 	cmd *exec.Cmd
 	out *os.File // mpv's output; a file, not a pipe, so mpv outlives ytwatch
+
+	cancelled atomic.Bool // set by Cancel, read by Wait in another goroutine
+}
+
+// ErrCancelled is returned by Wait after Cancel stopped mpv.
+var ErrCancelled = errors.New("playback cancelled")
+
+// Cancel stops mpv. mpv runs in its own session (Setsid), so its process
+// group id is its pid; the negative pid signals the whole group, which also
+// ends the yt-dlp process mpv started.
+func (p *Process) Cancel() {
+	p.cancelled.Store(true)
+	_ = syscall.Kill(-p.cmd.Process.Pid, syscall.SIGTERM)
 }
 
 // Failure describes an mpv run that ended with an error.
@@ -45,6 +59,9 @@ func (p *Process) Wait() error {
 	err := p.cmd.Wait()
 	output := tail(p.out)
 	p.out.Close()
+	if p.cancelled.Load() {
+		return ErrCancelled
+	}
 	if err == nil {
 		return nil
 	}

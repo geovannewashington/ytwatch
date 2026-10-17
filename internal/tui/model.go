@@ -75,6 +75,27 @@ type downloadDoneMsg struct {
 
 type animationMsg struct{}
 
+// undoWindow is how long u can still cancel the last play or download.
+const undoWindow = 10 * time.Second
+
+// tryUndo cancels the last play or download if it is still inside the undo
+// window. It reports whether it cancelled anything.
+func (m *Model) tryUndo() bool {
+	if m.undo == nil || time.Now().After(m.undo.until) {
+		return false
+	}
+	m.undo.cancel()
+	m.undo = nil
+	return true
+}
+
+// undoAction is the last play or download, which u cancels until it expires.
+type undoAction struct {
+	label  string
+	until  time.Time
+	cancel func()
+}
+
 type paneFocus int
 
 const (
@@ -95,6 +116,7 @@ type Model struct {
 	historyDraft string // what was typed before browsing
 	showHelp     bool
 	confirmQuit  bool // waiting for y/n after q or Ctrl+C
+	undo         *undoAction
 
 	filters      youtube.Filters // applied to every search
 	showFilters  bool
@@ -478,7 +500,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.status = fmt.Sprintf("▶ %d player(s) running", len(m.playing))
 		}
-		if msg.err != nil {
+		if errors.Is(msg.err, player.ErrCancelled) {
+			m.status = "Playback cancelled"
+		} else if msg.err != nil {
 			m.status = msg.err.Error()
 		}
 		// The running animation tick keeps itself alive; do not start another.
@@ -488,7 +512,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		delete(m.downloading, msg.id)
 		switch {
 		case errors.Is(msg.err, context.Canceled):
-			// ytwatch is quitting; yt-dlp resumes the partial file next time.
+			// Either ytwatch is quitting or u cancelled the download. yt-dlp
+			// resumes a partial file next time.
+			if m.ctx.Err() == nil {
+				m.status = "Download cancelled"
+			}
 		case msg.err != nil:
 			m.status = "Download failed | " + clean(msg.err.Error())
 		default:
@@ -514,7 +542,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.String() == "ctrl+c" {
-			m.confirmQuit = true
+			// Inside the undo window, Ctrl+C cancels the last action first.
+			if !m.tryUndo() {
+				m.confirmQuit = true
+			}
 			return m, nil
 		}
 		if m.searchMode {
@@ -825,6 +856,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		return nil
 	case "esc":
+		if m.tryUndo() {
+			return nil
+		}
 		if m.visual {
 			m.endVisual()
 			m.status = "Ready"
@@ -960,6 +994,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	case "d":
 		return m.downloadSelected()
+	case "u":
+		if !m.tryUndo() {
+			m.status = "Nothing to undo"
+		}
+		return nil
 	case "o":
 		return m.openLink(hasCount, count)
 	case "y":
@@ -1331,6 +1370,10 @@ func (m *Model) startPlayer(videos []media.Video) tea.Cmd {
 			}
 		}
 	}
+	m.undo = &undoAction{label: "playback", until: time.Now().Add(undoWindow), cancel: cmd.Cancel}
+	if !videos[0].IsCurrentlyLive() || len(videos) > 1 {
+		m.status += " | u, Esc or Ctrl+C: undo"
+	}
 	cmds := []tea.Cmd{waitForPlayer(cmd, ids)}
 	if !m.animating {
 		m.animating = true
@@ -1375,7 +1418,9 @@ func (m *Model) downloadSelected() tea.Cmd {
 func (m *Model) startDownloads(videos []media.Video) tea.Cmd {
 	var cmds []tea.Cmd
 	var last media.Video
-	ctx, cfg := m.ctx, m.cfg
+	// One context for the batch, so u cancels all of it.
+	ctx, stop := context.WithCancel(m.ctx)
+	cfg := m.cfg
 	opts := download.Options{AudioOnly: m.audioOnly, Quality: m.quality}
 	for _, v := range videos {
 		if _, exists := m.downloading[v.ID]; exists {
@@ -1389,14 +1434,17 @@ func (m *Model) startDownloads(videos []media.Video) tea.Cmd {
 			return downloadDoneMsg{id: v.ID, title: v.Title, path: path, err: err}
 		})
 	}
-	switch len(cmds) {
-	case 0:
+	if len(cmds) == 0 {
+		stop()
 		return nil
-	case 1:
+	}
+	m.undo = &undoAction{label: "download", until: time.Now().Add(undoWindow), cancel: stop}
+	if len(cmds) == 1 {
 		m.status = "⬇ Downloading | " + clean(last.Title)
-	default:
+	} else {
 		m.status = fmt.Sprintf("⬇ Downloading %d videos, one after the other", len(cmds))
 	}
+	m.status += " | u, Esc or Ctrl+C: undo"
 	return tea.Sequence(cmds...)
 }
 
@@ -1916,6 +1964,7 @@ func (m *Model) renderHelp() string {
 		{"f", "Filters: type, duration, upload date"},
 		{"V", "Select lines: Enter plays them, d downloads them"},
 		{"d  a  Q", "Download / audio only / video quality"},
+		{"u", "Undo a play or download within 10s (Esc, Ctrl+C too)"},
 		{"o  y", "Open / copy a link (3o: description link 3)"},
 		{"t", "Next color theme"},
 		{"?  q", "Close this help / quit"},
