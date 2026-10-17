@@ -237,7 +237,7 @@ func TestPlaylistRowAndPreviewShowYouTubeStyleDetails(t *testing.T) {
 
 	preview := m.renderPreview(70, 30)
 	for _, want := range []string{
-		"110 videos | updated today",
+		"110 videos · updated today",
 		"Alex Warren - Ordinary (Lyrics) · 3:06",
 		"Taylor Swift - Opalite (Lyrics) · 3:57",
 		"DESCRIPTION", "A curated playlist of the best songs.",

@@ -103,5 +103,5 @@ func (m *Model) visualStatus() string {
 	if _, skip := m.selectedVideos(false); skip.playlists > 0 {
 		text += " (" + skip.text() + ")"
 	}
-	return text + " | Enter play | d download | Esc cancel"
+	return text + noteMark + "Enter play · d download · Esc cancel"
 }

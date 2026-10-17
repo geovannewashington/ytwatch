@@ -75,6 +75,14 @@ type downloadDoneMsg struct {
 
 type animationMsg struct{}
 
+// noteMark splits a status message from its note. The footer shows the note
+// dimmed after the message. sanitize removes control characters from titles,
+// so text from the network cannot contain it.
+const noteMark = "\x1f"
+
+// undoNote is the note that follows a play or download status.
+const undoNote = noteMark + "u, Esc or Ctrl+C: undo"
+
 // undoWindow is how long u can still cancel the last play or download.
 const undoWindow = 10 * time.Second
 
@@ -324,7 +332,7 @@ func (m *Model) startStream(status string, run func(ctx context.Context, emit fu
 // resultsStatus counts what the list shows.
 func (m *Model) resultsStatus() string {
 	if m.listTitle != "" {
-		return fmt.Sprintf("%d videos | Esc goes back", len(m.items))
+		return fmt.Sprintf("%d videos"+noteMark+"Esc goes back", len(m.items))
 	}
 	return fmt.Sprintf("%d results", len(m.items))
 }
@@ -350,7 +358,7 @@ func (m *Model) openPlaylist(v media.Video) tea.Cmd {
 	m.parents = append(m.parents, resultsState{m.items, m.ranks, m.selected, m.top, m.listTitle, m.searching})
 	m.listTitle = clean(v.Title)
 	loc := m.locale()
-	cmd := m.startStream("Opening playlist... | Esc goes back", func(ctx context.Context, emit func(youtube.Event)) {
+	cmd := m.startStream("Opening playlist..."+noteMark+"Esc goes back", func(ctx context.Context, emit func(youtube.Event)) {
 		youtube.Browse(ctx, url, loc, emit)
 	})
 	return cmd
@@ -372,7 +380,7 @@ func (m *Model) closePlaylist() tea.Cmd {
 	m.endVisual()
 	m.status = m.resultsStatus()
 	if last.partial {
-		m.status += " | the search was stopped early, press r to run it again"
+		m.status += noteMark + "the search was stopped early, press r to run it again"
 	}
 	return m.scheduleThumbnail()
 }
@@ -518,9 +526,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.status = "Download cancelled"
 			}
 		case msg.err != nil:
-			m.status = "Download failed | " + clean(msg.err.Error())
+			m.status = "Download failed" + noteMark + clean(msg.err.Error())
 		default:
-			m.status = "✔ Saved | " + msg.path
+			m.status = "✔ Saved" + noteMark + msg.path
 		}
 		return m, nil
 
@@ -627,7 +635,7 @@ func (m *Model) handleSearchEvent(event youtube.Event) []tea.Cmd {
 		if _, isPlaying := m.playing[event.Video.ID]; isPlaying && event.Video.IsCurrentlyLive() && !m.chatOpened[event.Video.ID] {
 			if err := player.OpenYouTubeChat(event.Video, m.cfg); err == nil {
 				m.chatOpened[event.Video.ID] = true
-				m.status = "Live stream | opened YouTube chat"
+				m.status = "Live stream" + noteMark + "opened YouTube chat"
 			}
 		}
 		if m.selectedID() == event.Video.ID && m.thumbnailPaths[event.Video.ID] == "" && m.thumbLoadingID != event.Video.ID {
@@ -638,13 +646,13 @@ func (m *Model) handleSearchEvent(event youtube.Event) []tea.Cmd {
 		m.searching = false
 		if event.Err != nil && len(m.items) == 0 {
 			m.searchError = clean(event.Err.Error())
-			m.status = "Search failed | / to retry"
+			m.status = "Search failed" + noteMark + "/ to retry"
 		} else if len(m.items) == 0 && m.filters.Active() {
-			m.status = "No results with these filters | press f to change them"
+			m.status = "No results with these filters" + noteMark + "press f to change them"
 		} else if len(m.items) == 0 {
-			m.status = "No results | press / to search"
+			m.status = "No results" + noteMark + "press / to search"
 		} else {
-			m.status = m.resultsStatus() + " | resolving details..."
+			m.status = m.resultsStatus() + noteMark + "resolving details..."
 		}
 	case youtube.EventDetailsEnd:
 		m.metadataDone = true
@@ -833,7 +841,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.searchMode = true
 		m.setInput(m.query)
 		m.historyPos = -1
-		m.status = "Edit the search | Up/Down past searches | Enter runs | Esc cancels"
+		m.status = "Edit the search" + noteMark + "Up/Down past searches · Enter runs · Esc cancels"
 		return nil
 	case "?":
 		m.showHelp = true
@@ -982,12 +990,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		next := theme.Next(m.themeName)
 		ApplyTheme(next)
 		m.themeName = next.Name
-		m.status = "Theme: " + next.Name + " | this session only, set [theme] name in config.toml to keep it"
+		m.status = "Theme: " + next.Name + noteMark + "this session only, set [theme] name in config.toml to keep it"
 		return nil
 	case "a":
 		m.audioOnly = !m.audioOnly
 		if m.audioOnly {
-			m.status = "Audio-only mode on | applies to playing and downloading"
+			m.status = "Audio-only mode on" + noteMark + "applies to playing and downloading"
 		} else {
 			m.status = "Audio-only mode off"
 		}
@@ -1027,9 +1035,9 @@ func (m *Model) linkTarget(hasCount bool, n int) (url string, ok bool) {
 	case n <= len(urls):
 		return urls[n-1], true
 	case len(urls) == 0:
-		m.status = fmt.Sprintf("No link %d | this description has no links", n)
+		m.status = fmt.Sprintf("No link %d"+noteMark+"this description has no links", n)
 	default:
-		m.status = fmt.Sprintf("No link %d | this description has %d links", n, len(urls))
+		m.status = fmt.Sprintf("No link %d"+noteMark+"this description has %d links", n, len(urls))
 	}
 	return "", false
 }
@@ -1044,10 +1052,10 @@ func (m *Model) openLink(hasCount bool, n int) tea.Cmd {
 	if hasCount {
 		if argv, name, matched := links.Command(url, m.cfg.Links); matched {
 			if err := m.runCommand(argv); err != nil {
-				m.status = fmt.Sprintf("Link %d | %v", n, err)
+				m.status = fmt.Sprintf("Link %d"+noteMark+"%v", n, err)
 				return nil
 			}
-			m.status = fmt.Sprintf("Opened link %d | %s", n, name)
+			m.status = fmt.Sprintf("Opened link %d"+noteMark+"%s", n, name)
 			return nil
 		}
 	}
@@ -1281,7 +1289,7 @@ func (m *Model) showSelectedThumbnail() {
 		return
 	}
 	if !m.overlay.Show(path, leftWidth+2, y, rightWidth, thumbRows) {
-		m.status = "Thumbnail overlay unavailable | check ueberzugpp or set [preview] output in config.toml"
+		m.status = "Thumbnail overlay unavailable" + noteMark + "check ueberzugpp or set [preview] output in config.toml"
 	}
 }
 
@@ -1333,13 +1341,13 @@ func (m *Model) playQueue() tea.Cmd {
 	if len(fresh) == 0 {
 		m.status = "Nothing to play in the selection"
 		if text := skip.text(); text != "" {
-			m.status += " | " + text
+			m.status += noteMark + text
 		}
 		return nil
 	}
 	cmd := m.startPlayer(fresh)
 	if text := skip.text(); text != "" && cmd != nil {
-		m.status += " | " + text
+		m.status += noteMark + text
 	}
 	return cmd
 }
@@ -1357,22 +1365,22 @@ func (m *Model) startPlayer(videos []media.Video) tea.Cmd {
 		m.playing[v.ID] = v.Title
 	}
 	if len(videos) > 1 {
-		m.status = fmt.Sprintf("▶ Playing a queue of %d | < and > in mpv skip", len(videos))
+		m.status = fmt.Sprintf("▶ Playing a queue of %d"+noteMark+"< and > in mpv skip", len(videos))
 	} else {
 		v := videos[0]
-		m.status = "▶ Playing | " + clean(v.Title)
+		m.status = "▶ Playing" + noteMark + clean(v.Title)
 		if v.IsCurrentlyLive() {
 			if err := player.OpenYouTubeChat(v, m.cfg); err == nil {
 				m.chatOpened[v.ID] = true
-				m.status = "Live stream | opened chat"
+				m.status = "Live stream" + noteMark + "opened chat"
 			} else {
-				m.status = "Live stream | " + err.Error()
+				m.status = "Live stream" + noteMark + err.Error()
 			}
 		}
 	}
 	m.undo = &undoAction{label: "playback", until: time.Now().Add(undoWindow), cancel: cmd.Cancel}
 	if !videos[0].IsCurrentlyLive() || len(videos) > 1 {
-		m.status += " | u, Esc or Ctrl+C: undo"
+		m.status += undoNote
 	}
 	cmds := []tea.Cmd{waitForPlayer(cmd, ids)}
 	if !m.animating {
@@ -1408,7 +1416,7 @@ func (m *Model) downloadSelected() tea.Cmd {
 		m.status = "Nothing to download in the selection"
 	}
 	if text := skip.text(); text != "" {
-		m.status += " | " + text
+		m.status += noteMark + text
 	}
 	return cmd
 }
@@ -1440,11 +1448,11 @@ func (m *Model) startDownloads(videos []media.Video) tea.Cmd {
 	}
 	m.undo = &undoAction{label: "download", until: time.Now().Add(undoWindow), cancel: stop}
 	if len(cmds) == 1 {
-		m.status = "⬇ Downloading | " + clean(last.Title)
+		m.status = "⬇ Downloading" + noteMark + clean(last.Title)
 	} else {
 		m.status = fmt.Sprintf("⬇ Downloading %d videos, one after the other", len(cmds))
 	}
-	m.status += " | u, Esc or Ctrl+C: undo"
+	m.status += undoNote
 	return tea.Sequence(cmds...)
 }
 
@@ -1493,12 +1501,12 @@ func (m *Model) renderHeader() string {
 	default:
 		searchLine += truncate(m.query, max(10, m.width-8))
 	}
-	keys := "j/k move | h/l panes | Enter play | / search | f filters | ? help | q quit"
+	keys := "j/k move · h/l panes · Enter play · / search · f filters · ? help · q quit"
 	if len(m.parents) > 0 && !m.searchMode {
-		keys = "j/k move | Enter play | V select | Esc back to results | ? help | q quit"
+		keys = "j/k move · Enter play · V select · Esc back to results · ? help · q quit"
 	}
 	if m.searchMode {
-		keys = "Enter search | Esc cancel | Up/Down past searches | arrows move | Ctrl+U clear"
+		keys = "Enter search · Esc cancel · Up/Down past searches · arrows move · Ctrl+U clear"
 	}
 	center := func(s string) string {
 		return lipgloss.PlaceHorizontal(m.width, lipgloss.Center, s)
@@ -1589,20 +1597,20 @@ func (m *Model) renderResultLines(width, height int) string {
 		}
 		lines = append(lines, line)
 
-		meta := clean(v.ChannelName()) + " | " + v.DurationText()
+		meta := clean(v.ChannelName()) + " · " + v.DurationText()
 		if v.IsPlaylist() {
-			meta = strings.Join(append([]string{clean(v.ChannelName()), "playlist"}, playlistFacts(v)...), " | ")
+			meta = strings.Join(append([]string{clean(v.ChannelName()), "playlist"}, playlistFacts(v)...), " · ")
 		} else if v.IsCurrentlyLive() {
-			meta = clean(v.ChannelName()) + " | streaming now"
+			meta = clean(v.ChannelName()) + " · streaming now"
 			if v.ConcurrentViewers > 0 {
-				meta += " | " + v.ViewsText()
+				meta += " · " + v.ViewsText()
 			}
 		} else if v.ViewCount > 0 {
-			meta += " | " + v.ViewsText()
+			meta += " · " + v.ViewsText()
 		}
 		age := v.AgeText(time.Now())
 		if age != "date n/a" && !v.IsPlaylist() {
-			meta += " | " + age
+			meta += " · " + age
 		}
 		meta = truncate(meta, width-2)
 		if selected {
@@ -1750,7 +1758,7 @@ func (m *Model) renderPreview(width, height int) string {
 				stats = []string{"playlist"}
 			}
 		}
-		lines = append(lines, metaStyle.Render(truncate(strings.Join(stats, " | "), width)))
+		lines = append(lines, metaStyle.Render(truncate(strings.Join(stats, " · "), width)))
 		if section, style := m.streamSection(v, width); len(section) > 0 {
 			lines = append(lines, "")
 			for i, line := range section {
@@ -1825,7 +1833,7 @@ func (m *Model) renderFooter() string {
 	}
 	right := footerStyle.Render(tags + fmt.Sprintf("%d/%d", min(m.selected+1, len(m.items)), len(m.items)))
 	leftWidth := max(10, m.width-lipgloss.Width(right)-2-lipgloss.Width(prefix))
-	left := prefix + style.Render(padToWidth(truncate(status, leftWidth), leftWidth))
+	left := prefix + renderStatus(status, style, leftWidth)
 	return left + "  " + right
 }
 
@@ -1849,7 +1857,7 @@ func (m *Model) handleFilterKey(msg tea.KeyMsg) tea.Cmd {
 		m.showFilters = false
 		m.filters = m.filterDraft
 		if m.query == "" {
-			m.status = "Filters set | press / to search"
+			m.status = "Filters set" + noteMark + "press / to search"
 			return nil
 		}
 		return m.beginSearch(m.query)
@@ -1872,7 +1880,7 @@ func (m *Model) handleQualityKey(msg tea.KeyMsg) {
 	case "enter":
 		m.showQuality = false
 		m.quality = quality.Levels[m.qualityDraft]
-		m.status = "Quality: " + m.quality + " | applies to playing and downloading, set [general] quality to keep it"
+		m.status = "Quality: " + m.quality + noteMark + "applies to playing and downloading, set [general] quality to keep it"
 		m.showSelectedThumbnail()
 	case "esc", "q", "Q":
 		m.showQuality = false
@@ -1897,7 +1905,7 @@ func (m *Model) renderQuality() string {
 		}
 	}
 	b.WriteString("\n" + metaStyle.Render("Applies to playing and downloading.") + "\n")
-	b.WriteString(helpStyle.Render("j/k option | Enter choose | Esc cancel"))
+	b.WriteString(helpStyle.Render("j/k option · Enter choose · Esc cancel"))
 	box := helpBoxStyle.Render(b.String())
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
@@ -1947,7 +1955,7 @@ func (m *Model) renderFilters() string {
 		help = "YouTube has no date filter for Shorts, so it is ignored."
 	}
 	b.WriteString(metaStyle.Render(truncate(help, filterColumnWidth*len(columns))) + "\n")
-	b.WriteString(helpStyle.Render("j/k option | h/l column | Enter search | x reset | Esc cancel"))
+	b.WriteString(helpStyle.Render("j/k option · h/l column · Enter search · x reset · Esc cancel"))
 	box := helpBoxStyle.Render(b.String())
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
@@ -2206,4 +2214,21 @@ func inputParts(text string, cursor int) (before, under, after []rune) {
 		after = []rune(sanitize(string(all[cursor+1:])))
 	}
 	return before, under, after
+}
+
+// renderStatus draws a status message in style, followed by its note (the text
+// after noteMark) dimmed, and pads the result to width.
+func renderStatus(status string, style lipgloss.Style, width int) string {
+	message, note, hasNote := strings.Cut(status, noteMark)
+	message = truncate(message, width)
+	used := lipgloss.Width(message)
+	out := style.Render(message)
+	if hasNote && note != "" {
+		if room := width - used - 2; room > 0 {
+			note = "  " + truncate(note, room)
+			out += metaStyle.Render(note)
+			used += lipgloss.Width(note)
+		}
+	}
+	return out + strings.Repeat(" ", max(0, width-used))
 }
