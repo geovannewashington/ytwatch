@@ -55,6 +55,12 @@ type thumbnailDelayMsg struct {
 	sequence int
 }
 
+// windowPlacedMsg means a window opened by ytwatch was moved away, so the
+// terminal has its old size back. refreshThumbMsg redraws the thumbnail a
+// moment later, after the window manager has finished the layout.
+type windowPlacedMsg struct{}
+type refreshThumbMsg struct{ seq int }
+
 type thumbnailLoadedMsg struct {
 	id       string
 	sequence int
@@ -63,8 +69,10 @@ type thumbnailLoadedMsg struct {
 }
 
 type playerExitedMsg struct {
-	ids []string // everything that was in this mpv: one video, or a queue
-	err error
+	ids    []string // everything that was in this mpv: one video, or a queue
+	videos []media.Video
+	opts   player.Options
+	err    error
 }
 
 type downloadDoneMsg struct {
@@ -178,6 +186,7 @@ type Model struct {
 
 	metadataDone   bool
 	thumbnailPaths map[string]string
+	settleSeq      int
 	thumbSequence  int
 	thumbCancel    context.CancelFunc
 	thumbLoadingID string
@@ -443,6 +452,18 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.marqueeStep++
 		m.ticking = false // Update starts the next tick if it is still needed
 		return m, nil
+	case windowPlacedMsg:
+		return m, m.settleThumbnail()
+	case refreshThumbMsg:
+		if msg.seq == m.settleSeq {
+			m.redrawThumbnail()
+		}
+		return m, nil
+	case tea.FocusMsg:
+		// A workspace switch or a floating window can leave the image
+		// misplaced; coming back to the terminal draws it again.
+		return m, m.settleThumbnail()
+
 	case tea.WindowSizeMsg:
 		m.width, m.height = min(msg.Width, maxWidth), msg.Height
 		m.margin = (msg.Width - m.width) / 2
@@ -453,10 +474,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.scrollPreview(0)
 		if m.width < wideWidth || m.height < minHeight || m.showHelp || m.showFilters || m.showQuality {
 			m.overlay.Remove()
-		} else {
-			m.showSelectedThumbnail()
+			return m, nil
 		}
-		return m, nil
+		m.showSelectedThumbnail()
+		return m, m.settleThumbnail()
 
 	case searchStartedMsg:
 		if msg.generation != m.generation {
@@ -547,6 +568,15 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case playerExitedMsg:
 		for _, id := range msg.ids {
 			delete(m.playing, id)
+		}
+		if player.IsForbidden(msg.err) && !msg.opts.WebSafari {
+			// The faster default client was refused; web_safari is slower
+			// but works for these videos.
+			msg.opts.WebSafari = true
+			if cmd := m.startPlayerWith(msg.videos, msg.opts); cmd != nil {
+				m.status = "Retrying with another client" + noteMark + "HTTP 403"
+				return m, cmd
+			}
 		}
 		if len(m.playing) == 0 {
 			m.status = "Playback ended"
@@ -1366,6 +1396,35 @@ func loadThumbnail(ctx context.Context, v media.Video, sequence int) tea.Cmd {
 	}
 }
 
+// settleThumbnail redraws the image twice after the layout changed (a resize,
+// a focus change, a window moved away). Inside tmux, ueberzugpp hides the image
+// from a tmux hook that can run after our first redraw and nothing shows it
+// again; the second redraw covers a slow hook. Only the newest call counts.
+func (m *Model) settleThumbnail() tea.Cmd {
+	m.settleSeq++
+	seq := m.settleSeq
+	tick := func(d time.Duration) tea.Cmd {
+		return tea.Tick(d, func(time.Time) tea.Msg { return refreshThumbMsg{seq: seq} })
+	}
+	return tea.Batch(tick(250*time.Millisecond), tick(900*time.Millisecond))
+}
+
+// redrawThumbnail sends the image again, which makes ueberzugpp
+// read the position of the terminal again.
+func (m *Model) redrawThumbnail() {
+	if m.width < wideWidth || m.height < minHeight || m.showHelp || m.showFilters || m.showQuality {
+		return
+	}
+	m.overlay.Invalidate()
+	m.showSelectedThumbnail()
+}
+
+// Attach connects the model to the running program, so background work can
+// send it messages. Call it after tea.NewProgram.
+func (m *Model) Attach(send func(tea.Msg)) {
+	player.OnWindowPlaced = func() { send(windowPlacedMsg{}) }
+}
+
 func (m *Model) showSelectedThumbnail() {
 	if m.width < wideWidth || m.splitAnimating() {
 		m.overlay.Remove()
@@ -1449,7 +1508,11 @@ func (m *Model) playQueue() tea.Cmd {
 
 // startPlayer opens videos in one mpv. A single live stream also opens its chat.
 func (m *Model) startPlayer(videos []media.Video) tea.Cmd {
-	cmd, err := player.Start(videos, m.cfg, player.Options{AudioOnly: m.audioOnly, Quality: m.quality})
+	return m.startPlayerWith(videos, player.Options{AudioOnly: m.audioOnly, Quality: m.quality})
+}
+
+func (m *Model) startPlayerWith(videos []media.Video, opts player.Options) tea.Cmd {
+	cmd, err := player.Start(videos, m.cfg, opts)
 	if err != nil {
 		m.status = err.Error()
 		return nil
@@ -1477,7 +1540,7 @@ func (m *Model) startPlayer(videos []media.Video) tea.Cmd {
 	if !videos[0].IsCurrentlyLive() || len(videos) > 1 {
 		m.status += undoNote
 	}
-	cmds := []tea.Cmd{waitForPlayer(cmd, ids), undoExpiry()}
+	cmds := []tea.Cmd{waitForPlayer(cmd, ids, videos, opts), undoExpiry()}
 	if !m.animating {
 		m.animating = true
 		cmds = append(cmds, tickAnimation())
@@ -1551,9 +1614,9 @@ func (m *Model) startDownloads(videos []media.Video) tea.Cmd {
 	return tea.Batch(tea.Sequence(cmds...), undoExpiry())
 }
 
-func waitForPlayer(cmd *player.Process, ids []string) tea.Cmd {
+func waitForPlayer(cmd *player.Process, ids []string, videos []media.Video, opts player.Options) tea.Cmd {
 	return func() tea.Msg {
-		return playerExitedMsg{ids: ids, err: cmd.Wait()}
+		return playerExitedMsg{ids: ids, videos: videos, opts: opts, err: cmd.Wait()}
 	}
 }
 

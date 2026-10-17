@@ -77,7 +77,7 @@ func Snapshot(b Backend) map[string]Window {
 
 // pollInterval and moveTimeout are variables so tests can shorten them.
 var (
-	pollInterval = 150 * time.Millisecond
+	pollInterval = 40 * time.Millisecond
 	moveTimeout  = 15 * time.Second
 )
 

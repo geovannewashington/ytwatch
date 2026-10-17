@@ -79,7 +79,8 @@ func main() {
 
 	model := tui.New(query)
 	model.SetConfig(cfg)
-	program := tea.NewProgram(model, tea.WithAltScreen())
+	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithReportFocus())
+	model.Attach(program.Send)
 	if _, err := program.Run(); err != nil {
 		model.Close()
 		fmt.Fprintln(os.Stderr, "ytwatch:", err)
