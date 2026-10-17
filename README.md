@@ -9,7 +9,7 @@
 
 # ytwatch
 
-**Search YouTube from the terminal and play it in mpv.**
+**Search YouTube from your terminal.**
 
 [![Go](https://img.shields.io/badge/go-1.23+-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -96,7 +96,7 @@ of keys.
 | `/` | Edit the search. `Up` and `Down` walk through past searches |
 | `r` | Repeat the search |
 | `f` | Filters: type, duration, upload date |
-| `V` | Select lines, then `Enter` plays them as a queue and `d` downloads them |
+| `V` | Select several results, then `Enter` plays them as a queue and `d` downloads them |
 | `d` | Download. Files go to `~/Downloads/ytwatch` |
 | `a` | Audio only |
 | `Q` | Video quality: best, 1080p, 720p, 480p, 360p |

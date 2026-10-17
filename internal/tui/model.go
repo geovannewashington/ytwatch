@@ -229,7 +229,7 @@ func New(initialQuery string) *Model {
 	if m.query == "" {
 		m.searchMode = true
 		m.setInput("")
-		m.status = "Type a query and press Enter"
+		m.status = "Type your search and press Enter"
 	}
 	return m
 }
@@ -282,7 +282,7 @@ func (m *Model) beginSearch(query string) tea.Cmd {
 	if query == "" {
 		m.searchMode = true
 		m.setInput(m.query)
-		m.status = "Enter a search query"
+		m.status = "Type your search and press Enter"
 		return nil
 	}
 	filters := m.filters
@@ -294,7 +294,7 @@ func (m *Model) beginSearch(query string) tea.Cmd {
 	if m.history != nil {
 		m.history.Add(query, time.Now())
 	}
-	return m.startStream("Searching YouTube...", func(ctx context.Context, emit func(youtube.Event)) {
+	return m.startStream("Searching...", func(ctx context.Context, emit func(youtube.Event)) {
 		youtube.Search(ctx, query, filters, loc, emit)
 	})
 }
@@ -354,9 +354,9 @@ func (m *Model) startStream(status string, run func(ctx context.Context, emit fu
 // resultsStatus counts what the list shows.
 func (m *Model) resultsStatus() string {
 	if m.listTitle != "" {
-		return fmt.Sprintf("%d videos"+noteMark+"Esc goes back", len(m.items))
+		return plural(len(m.items), "result") + noteMark + "Esc to go back"
 	}
-	return fmt.Sprintf("%d results", len(m.items))
+	return plural(len(m.items), "result")
 }
 
 // resultsState is a list of results that can be returned to.
@@ -374,13 +374,13 @@ type resultsState struct {
 func (m *Model) openPlaylist(v media.Video) tea.Cmd {
 	url := v.CanonicalURL()
 	if url == "" {
-		m.status = "This playlist has no link"
+		m.status = "No link for this playlist"
 		return nil
 	}
 	m.parents = append(m.parents, resultsState{m.items, m.ranks, m.selected, m.top, m.listTitle, m.searching})
 	m.listTitle = clean(v.Title)
 	loc := m.locale()
-	cmd := m.startStream("Opening playlist..."+noteMark+"Esc goes back", func(ctx context.Context, emit func(youtube.Event)) {
+	cmd := m.startStream("Opening playlist..."+noteMark+"Esc to go back", func(ctx context.Context, emit func(youtube.Event)) {
 		youtube.Browse(ctx, url, loc, emit)
 	})
 	return cmd
@@ -402,7 +402,7 @@ func (m *Model) closePlaylist() tea.Cmd {
 	m.endVisual()
 	m.status = m.resultsStatus()
 	if last.partial {
-		m.status += noteMark + "the search was stopped early, press r to run it again"
+		m.status += noteMark + "stopped early" + noteMark + "r to retry"
 	}
 	return m.scheduleThumbnail()
 }
@@ -540,7 +540,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				})
 			}
 			m.thumbFailures[msg.id] = time.Now()
-			m.status = "Thumbnail unavailable; selection and playback still work"
+			m.status = "Thumbnail unavailable"
 		}
 		return m, nil
 
@@ -551,10 +551,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.playing) == 0 {
 			m.status = "Playback ended"
 		} else {
-			m.status = fmt.Sprintf("▶ %d player(s) running", len(m.playing))
+			m.status = fmt.Sprintf("Playing %d", len(m.playing))
 		}
 		if errors.Is(msg.err, player.ErrCancelled) {
-			m.status = "Playback cancelled"
+			m.status = "Playback canceled"
 		} else if msg.err != nil {
 			m.status = msg.err.Error()
 		}
@@ -568,12 +568,12 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Either ytwatch is quitting or u cancelled the download. yt-dlp
 			// resumes a partial file next time.
 			if m.ctx.Err() == nil {
-				m.status = "Download cancelled"
+				m.status = "Download canceled"
 			}
 		case msg.err != nil:
 			m.status = "Download failed" + noteMark + clean(msg.err.Error())
 		default:
-			m.status = "✔ Saved" + noteMark + msg.path
+			m.status = "Saved" + noteMark + msg.path
 		}
 		return m, nil
 
@@ -684,7 +684,7 @@ func (m *Model) handleSearchEvent(event youtube.Event) []tea.Cmd {
 		if _, isPlaying := m.playing[event.Video.ID]; isPlaying && event.Video.IsCurrentlyLive() && !m.chatOpened[event.Video.ID] {
 			if err := player.OpenYouTubeChat(event.Video, m.cfg); err == nil {
 				m.chatOpened[event.Video.ID] = true
-				m.status = "Live stream" + noteMark + "opened YouTube chat"
+				m.status = "Live" + noteMark + "chat opened"
 			}
 		}
 		if m.selectedID() == event.Video.ID && m.thumbnailPaths[event.Video.ID] == "" && m.thumbLoadingID != event.Video.ID {
@@ -695,13 +695,13 @@ func (m *Model) handleSearchEvent(event youtube.Event) []tea.Cmd {
 		m.searching = false
 		if event.Err != nil && len(m.items) == 0 {
 			m.searchError = clean(event.Err.Error())
-			m.status = "Search failed" + noteMark + "/ to retry"
+			m.status = "Search failed" + noteMark + "/ to try again"
 		} else if len(m.items) == 0 && m.filters.Active() {
-			m.status = "No results with these filters" + noteMark + "press f to change them"
+			m.status = "No results" + noteMark + "f to change filters"
 		} else if len(m.items) == 0 {
-			m.status = "No results" + noteMark + "press / to search"
+			m.status = "No results" + noteMark + "/ to search"
 		} else {
-			m.status = m.resultsStatus() + noteMark + "resolving details..."
+			m.status = m.resultsStatus()
 		}
 	case youtube.EventDetailsEnd:
 		m.metadataDone = true
@@ -766,13 +766,13 @@ func (m *Model) handleSearchInput(msg tea.KeyMsg) tea.Cmd {
 	case "enter":
 		query := strings.TrimSpace(m.searchInput)
 		if query == "" {
-			m.status = "Enter a search query"
+			m.status = "Type your search and press Enter"
 			return nil
 		}
 		return m.beginSearch(query)
 	case "esc":
 		m.searchMode = false
-		m.status = "Search cancelled"
+		m.status = "Search canceled"
 	case "up", "ctrl+p":
 		m.browseHistory(-1)
 		return nil
@@ -891,7 +891,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.searchMode = true
 		m.setInput(m.query)
 		m.historyPos = -1
-		m.status = "Edit the search" + noteMark + "Up/Down past searches · Enter runs · Esc cancels"
+		m.status = "Edit the search" + noteMark + "Up/Down for past searches · Esc to cancel"
 		return nil
 	case "?":
 		m.showHelp = true
@@ -936,7 +936,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		if m.width >= wideWidth {
 			m.focus = previewPane
 		} else {
-			m.status = "Widen the terminal to focus the preview pane"
+			m.status = "Terminal too narrow for the preview"
 		}
 		return nil
 	case "tab":
@@ -1040,20 +1040,20 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		next := theme.Next(m.themeName)
 		ApplyTheme(next)
 		m.themeName = next.Name
-		m.status = "Theme: " + next.Name + noteMark + "this session only, set [theme] name in config.toml to keep it"
+		m.status = "Theme " + next.Name + noteMark + "not saved, see [theme] in the README"
 		return nil
 	case "a":
 		m.audioOnly = !m.audioOnly
 		if m.audioOnly {
-			m.status = "Audio-only mode on" + noteMark + "applies to playing and downloading"
+			m.status = "Audio only on" + noteMark + "applies to play and download"
 		} else {
-			m.status = "Audio-only mode off"
+			m.status = "Audio only off"
 		}
 		return nil
 	case "B":
 		v, ok := m.selectedVideo()
 		if !ok || !v.IsPlaylist() {
-			m.status = "B opens a playlist to browse its videos"
+			m.status = "B browses a playlist"
 			return nil
 		}
 		return m.openPlaylist(v)
@@ -1082,7 +1082,7 @@ func (m *Model) linkTarget(hasCount bool, n int) (url string, ok bool) {
 	}
 	if !hasCount {
 		if url = v.CanonicalURL(); url == "" {
-			m.status = "This result has no URL"
+			m.status = "No link for this result"
 			return "", false
 		}
 		return url, true
@@ -1092,9 +1092,9 @@ func (m *Model) linkTarget(hasCount bool, n int) (url string, ok bool) {
 	case n <= len(urls):
 		return urls[n-1], true
 	case len(urls) == 0:
-		m.status = fmt.Sprintf("No link %d"+noteMark+"this description has no links", n)
+		m.status = fmt.Sprintf("No link %d"+noteMark+"the description has none", n)
 	default:
-		m.status = fmt.Sprintf("No link %d"+noteMark+"this description has %d links", n, len(urls))
+		m.status = fmt.Sprintf("No link %d"+noteMark+"the description has %s", n, plural(len(urls), "link"))
 	}
 	return "", false
 }
@@ -1121,9 +1121,9 @@ func (m *Model) openLink(hasCount bool, n int) tea.Cmd {
 		return nil
 	}
 	if hasCount {
-		m.status = fmt.Sprintf("Opened link %d in the browser", n)
+		m.status = fmt.Sprintf("Opened link %d", n)
 	} else {
-		m.status = "Opened the video in the browser"
+		m.status = "Opened video"
 	}
 	return nil
 }
@@ -1141,7 +1141,7 @@ func (m *Model) copyLink(hasCount bool, n int) tea.Cmd {
 	if hasCount {
 		m.status = fmt.Sprintf("Copied link %d", n)
 	} else {
-		m.status = "Copied video URL"
+		m.status = "Copied video link"
 	}
 	return nil
 }
@@ -1387,7 +1387,7 @@ func (m *Model) showSelectedThumbnail() {
 		return
 	}
 	if !m.overlay.Show(path, m.margin+leftWidth+2, y, rightWidth, thumbRows) {
-		m.status = "Thumbnail overlay unavailable" + noteMark + "check ueberzugpp or set [preview] output in config.toml"
+		m.status = "No thumbnails" + noteMark + "run ytwatch doctor"
 	}
 }
 
@@ -1412,11 +1412,11 @@ func (m *Model) playSelected() tea.Cmd {
 		return nil
 	}
 	if v.CanonicalURL() == "" {
-		m.status = "This result has no playable URL"
+		m.status = "No link for this result"
 		return nil
 	}
 	if _, exists := m.playing[v.ID]; exists {
-		m.status = "Already playing: " + v.Title
+		m.status = "Already playing" + noteMark + clean(v.Title)
 		return nil
 	}
 	return m.startPlayer([]media.Video{v})
@@ -1434,7 +1434,7 @@ func (m *Model) playQueue() tea.Cmd {
 		}
 	}
 	if len(fresh) == 0 {
-		m.status = "Nothing to play in the selection"
+		m.status = "Nothing to play"
 		if text := skip.text(); text != "" {
 			m.status += noteMark + text
 		}
@@ -1460,16 +1460,16 @@ func (m *Model) startPlayer(videos []media.Video) tea.Cmd {
 		m.playing[v.ID] = v.Title
 	}
 	if len(videos) > 1 {
-		m.status = fmt.Sprintf("▶ Playing a queue of %d"+noteMark+"< and > in mpv skip", len(videos))
+		m.status = fmt.Sprintf("Playing %d results"+noteMark+"< and > skip", len(videos))
 	} else {
 		v := videos[0]
-		m.status = "▶ Playing" + noteMark + clean(v.Title)
+		m.status = "Playing" + noteMark + clean(v.Title)
 		if v.IsCurrentlyLive() {
 			if err := player.OpenYouTubeChat(v, m.cfg); err == nil {
 				m.chatOpened[v.ID] = true
-				m.status = "Live stream" + noteMark + "opened chat"
+				m.status = "Live" + noteMark + "chat opened"
 			} else {
-				m.status = "Live stream" + noteMark + err.Error()
+				m.status = "Live" + noteMark + clean(err.Error())
 			}
 		}
 	}
@@ -1495,11 +1495,11 @@ func (m *Model) downloadSelected() tea.Cmd {
 			return nil
 		}
 		if v.IsPlaylist() {
-			m.status = "Open the playlist (B), then select videos with V to download them"
+			m.status = "Playlists can't be downloaded" + noteMark + "B to browse, V to select"
 			return nil
 		}
 		if v.IsCurrentlyLive() || v.IsUpcoming() {
-			m.status = "Live and upcoming streams cannot be downloaded"
+			m.status = "Live and upcoming streams can't be downloaded"
 			return nil
 		}
 		return m.startDownloads([]media.Video{v})
@@ -1508,7 +1508,7 @@ func (m *Model) downloadSelected() tea.Cmd {
 	m.endVisual()
 	cmd := m.startDownloads(videos)
 	if cmd == nil {
-		m.status = "Nothing to download in the selection"
+		m.status = "Nothing to download"
 	}
 	if text := skip.text(); text != "" {
 		m.status += noteMark + text
@@ -1527,7 +1527,7 @@ func (m *Model) startDownloads(videos []media.Video) tea.Cmd {
 	opts := download.Options{AudioOnly: m.audioOnly, Quality: m.quality}
 	for _, v := range videos {
 		if _, exists := m.downloading[v.ID]; exists {
-			m.status = "Already downloading: " + clean(v.Title)
+			m.status = "Already downloading" + noteMark + clean(v.Title)
 			continue
 		}
 		m.downloading[v.ID] = v.Title
@@ -1614,13 +1614,13 @@ func (m *Model) keyHints() string {
 }
 
 func (m *Model) renderHeader() string {
-	brand := titleStyle.Render("YTWATCH") + searchStyle.Render(" ✦ ") + taglineStyle.Render("Search YouTube from your terminal and play in mpv")
+	brand := titleStyle.Render("YTWATCH") + searchStyle.Render(" ✦ ") + taglineStyle.Render("Search YouTube from your terminal")
 	searchLine := searchStyle.Render("> ")
 	switch {
 	case m.searchMode:
 		searchLine += renderInput(m.searchInput, m.searchCursor, max(10, m.width-8))
 	case m.query == "":
-		searchLine += helpStyle.Render("press / to search videos, Shorts and live streams")
+		searchLine += helpStyle.Render("press / to search")
 	case m.listTitle != "":
 		room := max(10, m.width-8)
 		searchLine += truncate(m.query, room/3) + metaStyle.Render(" › ") +
@@ -1788,7 +1788,7 @@ func (m *Model) renderResultLines(width, height int) string {
 // line that says what is going on. In a pane too small for him it is just the
 // line.
 func (m *Model) renderEmptyList(width, height int) []string {
-	message, mood := "Press / to search YouTube", moodIdle
+	message, mood := "Press / to search", moodIdle
 	switch {
 	case m.searchMode:
 		message = "Type your search and press Enter"
@@ -1797,9 +1797,9 @@ func (m *Model) renderEmptyList(width, height int) []string {
 	case m.searching && len(m.parents) > 0:
 		message, mood = "Opening the playlist...", moodSearching
 	case m.searching:
-		message, mood = "Searching videos, Shorts and live streams...", moodSearching
+		message, mood = "Searching...", moodSearching
 	case m.searchDone:
-		message, mood = "No results. Press / to search again or f to change the filters", moodSad
+		message, mood = "No results · / to search again, f to change filters", moodSad
 	}
 	caption := subtitleStyle.Render(truncate(message, width))
 	if height < mascotHeight+4 || width < mascotWidth+2 {
@@ -1824,15 +1824,15 @@ func (m *Model) streamSection(v media.Video, width int) ([]string, lipgloss.Styl
 		if v.ConcurrentViewers > 0 {
 			head += "  " + v.ViewsText()
 		}
-		hint := "Enter plays in mpv"
+		hint := "Enter plays"
 		if m.cfg.Chat.Enabled {
-			hint += " and opens the chat window"
+			hint += " and opens the chat"
 		}
 		return []string{head, hint}, liveBadgeStyle
 	case media.KindUpcoming:
-		return []string{"⏳ UPCOMING  " + v.StartText(time.Now()), "Not live yet; playback works once it starts"}, upcomingBadgeStyle
+		return []string{"⏳ UPCOMING  " + v.StartText(time.Now()), "Not live yet · plays once it starts"}, upcomingBadgeStyle
 	case media.KindPastLive:
-		return []string{"📼 LIVE VOD", "Recording of a past livestream"}, pastLiveBadgeStyle
+		return []string{"📼 LIVE VOD", "Recording of a past live stream"}, pastLiveBadgeStyle
 	case media.KindPlaylist:
 		lines := []string{playlistMark + " PLAYLIST"}
 		for _, entry := range v.Entries[:min(len(v.Entries), 3)] {
@@ -1841,7 +1841,7 @@ func (m *Model) streamSection(v media.Video, width int) ([]string, lipgloss.Styl
 		if len(v.Entries) == 0 && !m.metadataDone {
 			lines = append(lines, "Loading videos...")
 		}
-		return append(lines, "Enter plays the full playlist · B browses it"), playlistBadgeStyle
+		return append(lines, "Enter plays all · B browses"), playlistBadgeStyle
 	}
 	return nil, metaStyle
 }
@@ -1880,10 +1880,10 @@ func (m *Model) renderPreview(width, height int) string {
 		lines = append(lines, "")
 	}
 	if !preview.Available() && thumbRows > 0 {
-		lines[1] = metaStyle.Render(truncate("Install ueberzugpp for thumbnails", width))
+		lines[1] = metaStyle.Render(truncate("No thumbnails · install ueberzugpp", width))
 	}
 	if !ok {
-		lines = append(lines, "", subtitleStyle.Render("Select a result to inspect it."))
+		lines = append(lines, "", subtitleStyle.Render("Select a result to see its details."))
 	} else {
 		lines = append(lines, "")
 		lines = append(lines, m.marqueeText(clean(v.Title), width))
@@ -1927,9 +1927,9 @@ func (m *Model) renderPreview(width, height int) string {
 		description := strings.TrimSpace(v.Description)
 		if description == "" {
 			if !m.metadataDone {
-				description = "Loading description and stream status..."
+				description = "Loading details..."
 			} else {
-				description = "No description available."
+				description = "No description"
 			}
 		} else {
 			description, _ = links.Annotate(description)
@@ -1956,7 +1956,7 @@ func (m *Model) renderFooter() string {
 	prefix := ""
 	if len(m.playing) > 0 {
 		prefix = equalizer(m.spinnerFrame, 3) + " "
-		status = "Playing " + strconv.Itoa(len(m.playing)) + " video(s)"
+		status = "Playing " + strconv.Itoa(len(m.playing))
 	}
 	if len(m.downloading) > 0 && len(m.playing) == 0 && m.animations != animOff {
 		prefix = searchStyle.Render(spinnerFrame(m.now())) + " "
@@ -2017,7 +2017,7 @@ func (m *Model) handleFilterKey(msg tea.KeyMsg) tea.Cmd {
 		m.showFilters = false
 		m.filters = m.filterDraft
 		if m.query == "" {
-			m.status = "Filters set" + noteMark + "press / to search"
+			m.status = "Filters set" + noteMark + "/ to search"
 			return nil
 		}
 		return m.beginSearch(m.query)
@@ -2040,7 +2040,7 @@ func (m *Model) handleQualityKey(msg tea.KeyMsg) {
 	case "enter":
 		m.showQuality = false
 		m.quality = quality.Levels[m.qualityDraft]
-		m.status = "Quality: " + m.quality + noteMark + "applies to playing and downloading, set [general] quality to keep it"
+		m.status = "Quality " + m.quality + noteMark + "not saved, see [general] in the README"
 		m.showSelectedThumbnail()
 	case "esc", "q", "Q":
 		m.showQuality = false
@@ -2125,13 +2125,13 @@ func (m *Model) renderHelp() string {
 	rows := [][2]string{
 		{"j k", "Move through the results"},
 		{"h l", "Switch between the results and the preview"},
-		{"Enter  B", "Play in mpv (a whole playlist too) / browse a playlist"},
-		{"Esc", "Go back, or quit from the main page"},
+		{"Enter  B", "Play (all of a playlist) / browse a playlist"},
+		{"Esc", "Back · quits on the main page"},
 		{"/  r", "Edit the search (Up/Down: past ones) / repeat it"},
 		{"f", "Filters: type, duration, upload date"},
-		{"V", "Select lines: Enter plays them, d downloads them"},
-		{"d  a  Q", "Download / audio only / video quality"},
-		{"u", "Undo a play or download within 10s (Esc, Ctrl+C too)"},
+		{"V", "Select several results · Enter plays, d downloads"},
+		{"d  a  Q", "Download / audio only / quality"},
+		{"u", "Undo a play or download (10 s) · Esc, Ctrl+C too"},
 		{"o  y", "Open / copy a link (3o: description link 3)"},
 		{"t", "Next color theme"},
 		{"?  q", "Close this help / quit"},

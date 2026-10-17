@@ -62,11 +62,11 @@ func runDoctor(w io.Writer, cfg config.Config, p probe) int {
 	windows := p.windowManager()
 	switch {
 	case windows != "":
-		info(w, "window manager", windows+" | mpv and chat windows can be moved to a workspace")
+		info(w, "window manager", windows+" · mpv and chat windows can be moved to a workspace")
 	case server == "X11":
-		info(w, "window manager", "none found | install wmctrl to place windows on X11 (optional)")
+		info(w, "window manager", "none found · install wmctrl to place windows on X11 (optional)")
 	default:
-		info(w, "window manager", "none supported | windows are not moved (sway, i3, Hyprland, niri, bspwm and X11 work)")
+		info(w, "window manager", "none supported · windows are not moved (sway, i3, Hyprland, niri, bspwm and X11 work)")
 	}
 	output, enabled := preview.ResolveOutput(cfg.Preview.Output, p.getenv)
 	if output == "" {
@@ -76,7 +76,7 @@ func runDoctor(w io.Writer, cfg config.Config, p probe) int {
 	case !enabled:
 		info(w, "thumbnails", "off in config.toml")
 	case err != nil:
-		info(w, "thumbnails", "ueberzugpp not installed | no thumbnails (see the Optional list)")
+		info(w, "thumbnails", "ueberzugpp not installed · no thumbnails (see the Optional list)")
 	default:
 		info(w, "thumbnails", "ueberzugpp, output: "+output)
 	}
@@ -89,11 +89,11 @@ func runDoctor(w io.Writer, cfg config.Config, p probe) int {
 	missing := 0
 	fmt.Fprintln(w, "\nRequired")
 	for _, dep := range []struct{ name, flag, hint string }{
-		{"yt-dlp", "--version", "pacman -S yt-dlp | dnf install yt-dlp | brew install yt-dlp | pipx install yt-dlp (apt's version is often too old for YouTube)"},
+		{"yt-dlp", "--version", "pacman -S yt-dlp · dnf install yt-dlp · brew install yt-dlp · pipx install yt-dlp (apt's version is often too old for YouTube)"},
 		{"mpv", "--version", "install mpv with your package manager"},
 	} {
 		if _, err := p.lookPath(dep.name); err != nil {
-			row(w, "MISSING", dep.name, dep.hint)
+			row(w, "missing", dep.name, dep.hint)
 			missing++
 			continue
 		}
@@ -102,35 +102,35 @@ func runDoctor(w io.Writer, cfg config.Config, p probe) int {
 
 	fmt.Fprintln(w, "\nOptional")
 	if tool, err := p.clipboard(); err == nil {
-		row(w, "ok", "clipboard", tool+" (y copies a URL)")
+		row(w, "ok", "clipboard", tool+" (y copies a link)")
 	} else {
-		row(w, "missing", "clipboard", "install wl-clipboard (Wayland) or xclip / xsel (X11) for y")
+		row(w, "optional", "clipboard", "install wl-clipboard (Wayland) or xclip / xsel (X11) for y")
 	}
 	if name := p.browser(cfg); name != "" {
 		row(w, "ok", "browser", name+" (o opens links, live chat)")
 	} else {
-		row(w, "missing", "browser", "none found | set [general] browser in config.toml")
+		row(w, "optional", "browser", "none found · set [general] browser in config.toml")
 	}
 	if _, err := p.lookPath("ueberzugpp"); err == nil {
 		row(w, "ok", "ueberzugpp", p.version("ueberzugpp", "--version"))
 	} else {
-		row(w, "missing", "ueberzugpp", "thumbnails | Arch: pacman -S ueberzugpp | Homebrew: brew install jstkdng/programs/ueberzugpp | other: github.com/jstkdng/ueberzugpp")
+		row(w, "optional", "ueberzugpp", "thumbnails · Arch: pacman -S ueberzugpp · Homebrew: brew install jstkdng/programs/ueberzugpp · other: github.com/jstkdng/ueberzugpp")
 	}
 	if _, err := p.lookPath("ffmpeg"); err == nil {
 		row(w, "ok", "ffmpeg", "downloads can merge video and audio")
 	} else {
-		row(w, "missing", "ffmpeg", "needed to merge video and audio in downloads (audio-only downloads work without it)")
+		row(w, "optional", "ffmpeg", "needed to merge video and audio in downloads (audio-only downloads work without it)")
 	}
 	if server == "X11" || windows == "" && server != "Wayland" {
 		if _, err := p.lookPath("wmctrl"); err == nil {
 			row(w, "ok", "wmctrl", "workspace placement on X11")
 		} else {
-			row(w, "missing", "wmctrl", "workspace placement on X11")
+			row(w, "optional", "wmctrl", "workspace placement on X11")
 		}
 	}
 
 	if missing > 0 {
-		fmt.Fprintf(w, "\n%d required program(s) missing.\n", missing)
+		fmt.Fprintf(w, "\n%d required programs missing.\n", missing)
 		return 1
 	}
 	fmt.Fprintln(w, "\nAll required programs found.")

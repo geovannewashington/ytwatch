@@ -16,7 +16,7 @@ import (
 
 const version = "0.2.0"
 
-const usage = `ytwatch - YouTube search TUI
+const usage = `ytwatch - search YouTube from your terminal
 
 Usage:
   ytwatch [search query]

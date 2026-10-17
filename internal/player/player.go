@@ -31,7 +31,7 @@ type Process struct {
 }
 
 // ErrCancelled is returned by Wait after Cancel stopped mpv.
-var ErrCancelled = errors.New("playback cancelled")
+var ErrCancelled = errors.New("playback canceled")
 
 // Cancel stops mpv. mpv runs in its own session (Setsid), so its process
 // group id is its pid; the negative pid signals the whole group, which also
@@ -49,7 +49,7 @@ type Failure struct {
 
 func (f *Failure) Error() string {
 	if f.Reason != "" {
-		return fmt.Sprintf("mpv exited with code %d | %s", f.Code, f.Reason)
+		return fmt.Sprintf("mpv exited with code %d · %s", f.Code, f.Reason)
 	}
 	return fmt.Sprintf("mpv exited with code %d", f.Code)
 }

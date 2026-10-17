@@ -400,7 +400,7 @@ func TestLinkNumberOutOfRangeAndNoLinks(t *testing.T) {
 	m.handleKey(runeKey('j')) // the video without links
 	m.handleKey(runeKey('1'))
 	m.handleKey(runeKey('y'))
-	if !strings.Contains(m.status, "no links") {
+	if !strings.Contains(m.status, "has none") {
 		t.Fatalf("status = %q", m.status)
 	}
 	if len(*calls) != 0 {
@@ -970,7 +970,7 @@ func TestStartScreenHasOnePaneAndSaysTypeToSearch(t *testing.T) {
 		t.Fatalf("the start screen should say to type:\n%s", out)
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	if out := m.View(); !strings.Contains(out, "Press / to search YouTube") {
+	if out := m.View(); !strings.Contains(out, "Press / to search") {
 		t.Fatalf("after Esc the screen should say to press /:\n%s", out)
 	}
 }

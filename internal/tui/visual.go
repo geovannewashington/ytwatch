@@ -13,7 +13,7 @@ import (
 // startVisual begins a selection at the current result.
 func (m *Model) startVisual() {
 	if len(m.items) == 0 {
-		m.status = "No results to select"
+		m.status = "Nothing to select"
 		return
 	}
 	m.visual = true
@@ -103,5 +103,5 @@ func (m *Model) visualStatus() string {
 	if _, skip := m.selectedVideos(false); skip.playlists > 0 {
 		text += " (" + skip.text() + ")"
 	}
-	return text + noteMark + "Enter play · d download · Esc cancel"
+	return text
 }

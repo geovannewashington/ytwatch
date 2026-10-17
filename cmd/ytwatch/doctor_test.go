@@ -54,7 +54,7 @@ func TestDoctorReportsMissingRequiredPrograms(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
 	}
-	for _, want := range []string{"MISSING", "yt-dlp", "pipx install yt-dlp", "mpv", "2 required program(s) missing", "console or SSH"} {
+	for _, want := range []string{"missing", "yt-dlp", "pipx install yt-dlp", "mpv", "2 required programs missing", "console or SSH"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("report is missing %q:\n%s", want, text)
 		}
