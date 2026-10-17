@@ -94,6 +94,7 @@ type Model struct {
 	historyPos   int    // index in the history while browsing it with Up/Down
 	historyDraft string // what was typed before browsing
 	showHelp     bool
+	confirmQuit  bool // waiting for y/n after q or Ctrl+C
 
 	filters      youtube.Filters // applied to every search
 	showFilters  bool
@@ -504,9 +505,17 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tickAnimation()
 
 	case tea.KeyMsg:
+		if m.confirmQuit {
+			if key := msg.String(); key == "y" || key == "Y" {
+				m.cancel()
+				return m, tea.Quit
+			}
+			m.confirmQuit = false
+			return m, nil
+		}
 		if msg.String() == "ctrl+c" {
-			m.cancel()
-			return m, tea.Quit
+			m.confirmQuit = true
+			return m, nil
 		}
 		if m.searchMode {
 			return m, m.handleSearchInput(msg)
@@ -773,9 +782,21 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	m.countPrefix = ""
 
 	switch key {
-	case "q", "ctrl+c":
-		m.cancel()
-		return tea.Quit
+	case "q":
+		// q first closes the layer the user is in, like Esc does.
+		if m.visual {
+			m.endVisual()
+			m.status = "Ready"
+			return nil
+		}
+		if len(m.parents) > 0 {
+			return m.closePlaylist()
+		}
+		m.confirmQuit = true
+		return nil
+	case "ctrl+c":
+		m.confirmQuit = true
+		return nil
 	case "/":
 		// The current query is there to edit; Ctrl+U clears it.
 		m.searchMode = true
@@ -812,7 +833,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		if len(m.parents) > 0 {
 			return m.closePlaylist()
 		}
-		m.status = "Ready"
+		m.confirmQuit = true
 		return nil
 	case "enter":
 		return m.playSelected()
@@ -1736,6 +1757,11 @@ func (m *Model) renderFooter() string {
 		style = errorStyle
 		prefix = ""
 	}
+	if m.confirmQuit {
+		status = "Quit? y/n"
+		style = shortBadgeStyle // yellow in every theme
+		prefix = ""
+	}
 	tags := ""
 	if summary := m.filters.Summary(); summary != "" {
 		tags += truncate(strings.ReplaceAll(summary, ", ", " · "), max(10, m.width/3)) + "  "
@@ -1885,7 +1911,7 @@ func (m *Model) renderHelp() string {
 		{"j k", "Move through the results"},
 		{"h l", "Switch between the results and the preview"},
 		{"Enter", "Play in mpv, or open a playlist"},
-		{"Esc", "Go back from a playlist or a selection"},
+		{"Esc", "Go back, or quit from the main page"},
 		{"/  r", "Edit the search (Up/Down: past ones) / repeat it"},
 		{"f", "Filters: type, duration, upload date"},
 		{"V", "Select lines: Enter plays them, d downloads them"},

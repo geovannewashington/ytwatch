@@ -91,7 +91,7 @@ of keys.
 |---|---|
 | `j` `k`, `h` `l` | Move through results, switch between results and preview |
 | `Enter` | Play in mpv. On a playlist, open it. |
-| `Esc` | Go back from a playlist |
+| `Esc` | Go back from a playlist, or quit from the main page |
 | `/` | Edit the search. `Up` and `Down` walk through past searches |
 | `r` | Repeat the search |
 | `f` | Filters: type, duration, upload date |
