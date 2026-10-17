@@ -1000,6 +1000,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			m.status = "Audio-only mode off"
 		}
 		return nil
+	case "B":
+		v, ok := m.selectedVideo()
+		if !ok || !v.IsPlaylist() {
+			m.status = "B opens a playlist to browse its videos"
+			return nil
+		}
+		return m.openPlaylist(v)
 	case "d":
 		return m.downloadSelected()
 	case "u":
@@ -1317,9 +1324,6 @@ func (m *Model) playSelected() tea.Cmd {
 		m.status = "This result has no playable URL"
 		return nil
 	}
-	if v.IsPlaylist() {
-		return m.openPlaylist(v)
-	}
 	if _, exists := m.playing[v.ID]; exists {
 		m.status = "Already playing: " + v.Title
 		return nil
@@ -1400,7 +1404,7 @@ func (m *Model) downloadSelected() tea.Cmd {
 			return nil
 		}
 		if v.IsPlaylist() {
-			m.status = "Open the playlist (Enter), then select videos with V to download them"
+			m.status = "Open the playlist (B), then select videos with V to download them"
 			return nil
 		}
 		if v.IsCurrentlyLive() || v.IsUpcoming() {
@@ -1689,7 +1693,7 @@ func (m *Model) streamSection(v media.Video, width int) ([]string, lipgloss.Styl
 		if len(v.Entries) == 0 && !m.metadataDone {
 			lines = append(lines, "Loading videos...")
 		}
-		return append(lines, "Enter plays the full playlist"), playlistBadgeStyle
+		return append(lines, "Enter plays the full playlist · B browses it"), playlistBadgeStyle
 	}
 	return nil, metaStyle
 }
@@ -1965,7 +1969,7 @@ func (m *Model) renderHelp() string {
 	rows := [][2]string{
 		{"j k", "Move through the results"},
 		{"h l", "Switch between the results and the preview"},
-		{"Enter", "Play in mpv, or open a playlist"},
+		{"Enter  B", "Play in mpv (a whole playlist too) / browse a playlist"},
 		{"Esc", "Go back, or quit from the main page"},
 		{"/  r", "Edit the search (Up/Down: past ones) / repeat it"},
 		{"f", "Filters: type, duration, upload date"},

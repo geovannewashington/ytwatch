@@ -731,7 +731,7 @@ func playlistVideo() media.Video {
 	return media.Video{ID: "PLplaylist0001", Title: "My playlist", URL: "https://www.youtube.com/playlist?list=PLplaylist0001", PlaylistCount: 12}
 }
 
-func TestEnterOpensAPlaylistAndEscComesBack(t *testing.T) {
+func TestBOpensAPlaylistAndEscComesBack(t *testing.T) {
 	m := New("test")
 	m.width, m.height = 120, 30
 	m.items = []media.Video{{ID: "video0001", Title: "One"}, playlistVideo(), {ID: "video0003", Title: "Three"}}
@@ -739,9 +739,9 @@ func TestEnterOpensAPlaylistAndEscComesBack(t *testing.T) {
 	m.selected, m.top = 1, 0
 	m.searchDone, m.metadataDone = true, true
 
-	cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'B'}})
 	if cmd == nil || len(m.parents) != 1 || m.listTitle != "My playlist" {
-		t.Fatalf("Enter should open the playlist: cmd=%v parents=%d title=%q", cmd != nil, len(m.parents), m.listTitle)
+		t.Fatalf("B should open the playlist: cmd=%v parents=%d title=%q", cmd != nil, len(m.parents), m.listTitle)
 	}
 	if len(m.items) != 0 || !m.searching {
 		t.Fatalf("the list should be empty while the playlist loads: %d items, searching=%v", len(m.items), m.searching)

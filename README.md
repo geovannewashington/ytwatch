@@ -29,7 +29,7 @@ API key.
 - Results stream in as they are found, with channel, length, views, age,
   description (with its line breaks) and thumbnail.
 - Videos, Shorts, live streams and playlists in one search, with badges.
-- Open a playlist to browse its videos.
+- Play a whole playlist, or open it with `B` to browse its videos.
 - Search filters like youtube.com: type, duration, upload date.
 - Set the search language and region.
 - Select several results with `V` and play them as a queue or download them.
@@ -90,7 +90,8 @@ of keys.
 | Key | Action |
 |---|---|
 | `j` `k`, `h` `l` | Move through results, switch between results and preview |
-| `Enter` | Play in mpv. On a playlist, open it. |
+| `Enter` | Play in mpv. On a playlist, play all of it. |
+| `B` | Browse a playlist: open it to pick single videos |
 | `Esc` | Go back from a playlist, or quit from the main page |
 | `/` | Edit the search. `Up` and `Down` walk through past searches |
 | `r` | Repeat the search |
