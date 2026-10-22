@@ -2345,8 +2345,9 @@ func wrapLines(s string, width, maxLines int) []string {
 }
 
 // sanitize removes characters whose terminal width is unreliable (emoji,
-// joiners, variation selectors) or that would break the layout (control
-// characters). Such characters make borders drift while scrolling.
+// joiners, variation selectors, combining marks such as the vowel signs of
+// Bengali or Hindi) or that would break the layout (control characters). Such
+// characters make borders drift while scrolling.
 func clean(s string) string { return sanitize(s) }
 
 // durationPart is the length of v for a row or the preview. A result whose
@@ -2367,6 +2368,9 @@ func sanitize(s string) string {
 		case r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0):
 			return -1
 		case r == 0x200d || (r >= 0xfe00 && r <= 0xfe0f) || (r >= 0x2190 && r <= 0x2bff) || r >= 0x1f000:
+			return -1
+		case unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Mc, r):
+			// lipgloss and terminals count these differently.
 			return -1
 		}
 		return r

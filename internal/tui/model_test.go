@@ -1003,3 +1003,16 @@ func TestDurationIsLeftOutUntilDetailsArrive(t *testing.T) {
 		t.Errorf("a known length: %q %v", text, ok)
 	}
 }
+
+func TestSanitizeDropsCombiningMarks(t *testing.T) {
+	cases := map[string]string{
+		"গো বাংলা":   "গ বল",
+		"plain text": "plain text",
+		"é":         "e",
+	}
+	for in, want := range cases {
+		if got := sanitize(in); got != want {
+			t.Errorf("sanitize(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
