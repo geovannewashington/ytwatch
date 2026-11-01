@@ -47,7 +47,7 @@ func Browse(ctx context.Context, url string, loc locale.Locale, emit func(Event)
 		}
 		close(jobs)
 	}()
-	result := runQuery(listCtx, url, playlistBrowseLimit, loc, mainRanking, false, nil, &seen, &count, limited, nil, emit)
+	result := runQuery(listCtx, url, playlistBrowseLimit, loc, mainRanking, false, nil, nil, &seen, &count, limited, nil, emit)
 	close(limited)
 
 	var err error

@@ -88,6 +88,29 @@ var (
 	errBrowseTimedOut = errors.New("loading timed out; showing the videos found so far")
 )
 
+// hiddenKinds is the set of kinds a search leaves out: those in [search] hide,
+// except the kinds that the filter asks for, so a Shorts search still finds
+// Shorts when they are hidden.
+func hiddenKinds(hide []media.Kind, f Filters) map[media.Kind]bool {
+	if len(hide) == 0 {
+		return nil
+	}
+	hidden := map[media.Kind]bool{}
+	for _, kind := range hide {
+		hidden[kind] = true
+	}
+	switch f.Type {
+	case TypeShorts:
+		delete(hidden, media.KindShort)
+	case TypeLive:
+		delete(hidden, media.KindLive)
+		delete(hidden, media.KindUpcoming)
+	case TypePlaylists:
+		delete(hidden, media.KindPlaylist)
+	}
+	return hidden
+}
+
 // channelStreamBoost moves the streams that are on air now from the channel the
 // user searched for above every other result. It keeps the order within the
 // group, and ranks of different sources still never tie.
@@ -195,7 +218,8 @@ type queryResult struct {
 // because only that page supports them. All of them stream flat results
 // immediately; richer metadata is resolved by a bounded worker pool so stream
 // status and Shorts details can update later.
-func Search(ctx context.Context, query string, filters Filters, loc locale.Locale, emit func(Event)) {
+func Search(ctx context.Context, query string, filters Filters, hide []media.Kind, loc locale.Locale, emit func(Event)) {
+	hidden := hiddenKinds(hide, filters)
 	query = strings.TrimSpace(query)
 	if query == "" {
 		emit(Event{Kind: EventSearchDone, Err: errors.New("enter a search query")})
@@ -213,8 +237,14 @@ func Search(ctx context.Context, query string, filters Filters, loc locale.Local
 	var seen sync.Map
 	var uniqueCount atomic.Int64
 	var searchWG sync.WaitGroup
+	// The live page has nothing to show when live and upcoming are hidden.
+	skipLive := hidden[media.KindLive] && hidden[media.KindUpcoming]
 	// The main query and the live page can each return the matched channel.
-	channel := newTopChannel(query, 2)
+	sources := 2
+	if skipLive {
+		sources = 1
+	}
+	channel := newTopChannel(query, sources)
 	var queries []func() queryResult
 	if filters.Active() {
 		if filters.Type == TypeShorts {
@@ -227,29 +257,34 @@ func Search(ctx context.Context, query string, filters Filters, loc locale.Local
 			})
 		} else {
 			queries = append(queries, func() queryResult {
-				return runQuery(searchCtx, resultsURL(query, filters), filteredResultCount, loc, mainRanking, filters.Type == TypeLive, nil, &seen, &uniqueCount, regularJobs, liveJobs, emit)
+				return runQuery(searchCtx, resultsURL(query, filters), filteredResultCount, loc, mainRanking, filters.Type == TypeLive, nil, hidden, &seen, &uniqueCount, regularJobs, liveJobs, emit)
 			})
 		}
 	} else {
-		queries = append(queries,
-			func() queryResult {
-				return runQuery(searchCtx, fmt.Sprintf("ytsearch%d:%s", videoResultCount, query), 0, loc, mainRanking, false, channel, &seen, &uniqueCount, regularJobs, liveJobs, emit)
-			},
-			func() queryResult {
+		queries = append(queries, func() queryResult {
+			return runQuery(searchCtx, fmt.Sprintf("ytsearch%d:%s", videoResultCount, query), 0, loc, mainRanking, false, channel, hidden, &seen, &uniqueCount, regularJobs, liveJobs, emit)
+		})
+		if !skipLive {
+			queries = append(queries, func() queryResult {
 				// The results page filtered to live streams, in YouTube's own
 				// order. The normal search misses streams that YouTube shows
 				// in a "live now" card, and has no viewer-based order.
-				return runQuery(searchCtx, resultsURL(query, Filters{Type: TypeLive}), liveResultCount, loc, liveRanking, true, channel, &seen, &uniqueCount, regularJobs, liveJobs, emit)
-			},
-			func() queryResult {
+				return runQuery(searchCtx, resultsURL(query, Filters{Type: TypeLive}), liveResultCount, loc, liveRanking, true, channel, hidden, &seen, &uniqueCount, regularJobs, liveJobs, emit)
+			})
+		}
+		// Hidden kinds are not even requested.
+		if !hidden[media.KindPlaylist] {
+			queries = append(queries, func() queryResult {
 				return runPlaylistQuery(searchCtx, playlistSearchURL(query), playlistCount, loc, playlistRanking, &seen, &uniqueCount, liveJobs, emit)
-			},
-			func() queryResult {
+			})
+		}
+		if !hidden[media.KindShort] {
+			queries = append(queries, func() queryResult {
 				// yt-dlp's search never returns Shorts, so they come from the
 				// Shorts results page.
 				return runShortsQuery(searchCtx, query, Filters{Type: TypeShorts}, loc, shortResultCount, shortRanking(query), &seen, &uniqueCount, regularJobs, emit)
-			},
-		)
+			})
+		}
 	}
 	queryResults := make(chan queryResult, len(queries))
 	for _, run := range queries {
@@ -378,6 +413,7 @@ func runQuery(
 	order ranking,
 	prioritizeLive bool,
 	channel *topChannel,
+	hidden map[media.Kind]bool,
 	seen *sync.Map,
 	uniqueCount *atomic.Int64,
 	regularJobs chan<- media.Video,
@@ -445,6 +481,9 @@ func runQuery(
 			continue
 		}
 		if order.onlyLive && !video.IsCurrentlyLive() && !video.IsUpcoming() {
+			continue
+		}
+		if hidden[video.Kind()] {
 			continue
 		}
 		if video.Title == "" {

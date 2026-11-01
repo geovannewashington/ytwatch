@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/geovannewashington/ytwatch/internal/locale"
+	"github.com/geovannewashington/ytwatch/internal/media"
 	"github.com/geovannewashington/ytwatch/internal/quality"
 	"github.com/geovannewashington/ytwatch/internal/theme"
 )
@@ -75,6 +76,9 @@ type Search struct {
 	// Region is a two-letter country code such as "BR". yt-dlp sends it as a
 	// fake X-Forwarded-For address, which YouTube may ignore.
 	Region string
+	// Hide lists kinds of results that searches never show: shorts, playlists,
+	// live, upcoming and vods. A filter that asks for a kind shows it anyway.
+	Hide []media.Kind
 }
 
 // History configures the list of past searches, which Up and Down walk through
@@ -276,6 +280,11 @@ func (c *Config) set(section, key, raw string) error {
 		if value, err = parseString(raw); err == nil {
 			c.Search.Language, err = locale.NormalizeLanguage(value)
 		}
+	case "search.hide":
+		var names []string
+		if names, err = parseStringArray(raw); err == nil {
+			c.Search.Hide, err = parseKinds(names)
+		}
 	case "search.region":
 		var value string
 		if value, err = parseString(raw); err == nil {
@@ -399,6 +408,21 @@ func parseString(raw string) (string, error) {
 		return raw, nil
 	}
 	return "", fmt.Errorf("expected a quoted string, got %s", raw)
+}
+
+// parseKinds turns the names in [search] hide into kinds, without repeats.
+func parseKinds(names []string) ([]media.Kind, error) {
+	var kinds []media.Kind
+	for _, name := range names {
+		kind, ok := media.ParseKind(name)
+		if !ok {
+			return nil, fmt.Errorf("unknown kind %q, use: %s", name, media.KindNames)
+		}
+		if !slices.Contains(kinds, kind) {
+			kinds = append(kinds, kind)
+		}
+	}
+	return kinds, nil
 }
 
 func parseStringArray(raw string) ([]string, error) {

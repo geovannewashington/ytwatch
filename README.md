@@ -125,6 +125,7 @@ output = "auto"               # auto, off, x11, wayland, sixel, kitty, iterm2, c
 [search]
 language = "en"               # a code such as en, pt-BR or ja; empty: YouTube decides
 region = "US"                 # a two-letter country code; empty: YouTube decides
+hide = []                     # never show: shorts, playlists, live, upcoming, vods
 
 [history]
 enabled = true

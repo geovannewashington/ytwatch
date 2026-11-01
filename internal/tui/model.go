@@ -329,6 +329,7 @@ func (m *Model) beginSearch(query string) tea.Cmd {
 		return nil
 	}
 	filters := m.filters
+	hide := m.cfg.Search.Hide
 	loc := m.locale()
 	m.query = query
 	m.setInput(query)
@@ -338,7 +339,7 @@ func (m *Model) beginSearch(query string) tea.Cmd {
 		m.history.Add(query, time.Now())
 	}
 	return m.startStream("Searching...", func(ctx context.Context, emit func(youtube.Event)) {
-		youtube.Search(ctx, query, filters, loc, emit)
+		youtube.Search(ctx, query, filters, hide, loc, emit)
 	})
 }
 

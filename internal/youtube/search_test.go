@@ -46,7 +46,7 @@ esac
 	defer cancel()
 	var mu sync.Mutex
 	var events []Event
-	Search(ctx, "Go interfaces", Filters{}, locale.Locale{}, func(event Event) {
+	Search(ctx, "Go interfaces", Filters{}, nil, locale.Locale{}, func(event Event) {
 		mu.Lock()
 		events = append(events, event)
 		mu.Unlock()
@@ -115,7 +115,7 @@ esac
 	defer cancel()
 	var mu sync.Mutex
 	rank := map[string]int{}
-	Search(ctx, "topic", Filters{}, locale.Locale{}, func(event Event) {
+	Search(ctx, "topic", Filters{}, nil, locale.Locale{}, func(event Event) {
 		if event.Kind == EventResult {
 			mu.Lock()
 			rank[event.Video.ID] = event.Rank
@@ -151,7 +151,7 @@ func TestSearchPassesTheLocaleToYtDlpAndTheShortsPage(t *testing.T) {
 		return nil, errors.New("offline")
 	}
 
-	Search(context.Background(), "topic", Filters{}, locale.Locale{Language: "pt-BR", Region: "BR"}, func(Event) {})
+	Search(context.Background(), "topic", Filters{}, nil, locale.Locale{Language: "pt-BR", Region: "BR"}, func(Event) {})
 
 	data, _ := os.ReadFile(log)
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
@@ -259,7 +259,7 @@ esac
 	defer cancel()
 	var mu sync.Mutex
 	rank := map[string]int{}
-	Search(ctx, "topic", Filters{}, locale.Locale{}, func(event Event) {
+	Search(ctx, "topic", Filters{}, nil, locale.Locale{}, func(event Event) {
 		if event.Kind == EventResult {
 			mu.Lock()
 			rank[event.Video.ID] = event.Rank
@@ -320,7 +320,7 @@ func runFakeSearch(t *testing.T, fake string) map[string]int {
 	defer cancel()
 	var mu sync.Mutex
 	rank := map[string]int{}
-	Search(ctx, "topic", Filters{}, locale.Locale{}, func(event Event) {
+	Search(ctx, "topic", Filters{}, nil, locale.Locale{}, func(event Event) {
 		if event.Kind == EventResult {
 			mu.Lock()
 			rank[event.Video.ID] = event.Rank
@@ -374,5 +374,74 @@ esac
 	}
 	if rank["streamother01"] <= rank["first000001"] {
 		t.Errorf("with a channel ID, a stream of another channel must not be boosted, ranks: %v", rank)
+	}
+}
+
+func TestHiddenKindsAreLeftOutUnlessTheFilterAsksForThem(t *testing.T) {
+	all := []media.Kind{media.KindShort, media.KindPlaylist, media.KindLive, media.KindUpcoming, media.KindPastLive}
+	got := hiddenKinds(all, Filters{})
+	for _, kind := range all {
+		if !got[kind] {
+			t.Errorf("kind %d should be hidden with no filter", kind)
+		}
+	}
+	if hiddenKinds(all, Filters{Type: TypeShorts})[media.KindShort] {
+		t.Error("a Shorts filter must show Shorts")
+	}
+	live := hiddenKinds(all, Filters{Type: TypeLive})
+	if live[media.KindLive] || live[media.KindUpcoming] || !live[media.KindShort] {
+		t.Errorf("a live filter shows live and upcoming only, got %v", live)
+	}
+	if hiddenKinds(nil, Filters{}) != nil {
+		t.Error("nothing hidden should give no set")
+	}
+}
+
+func TestSearchDropsHiddenKindsAndSkipsTheirQueries(t *testing.T) {
+	binDir := t.TempDir()
+	log := filepath.Join(binDir, "calls.log")
+	fake := `#!/bin/sh
+echo "$*" >> ` + log + `
+case "$*" in
+  *--dump-single-json*) exit 1 ;;
+  *LIVEPAGE*)
+    printf '%s\n' '{"id":"onair000001","title":"On air","live_status":"is_live"}'
+    ;;
+  *'ytsearch35:topic'*)
+    printf '%s\n' '{"id":"plain000001","title":"Plain"}'
+    printf '%s\n' '{"id":"vod0000001","title":"Recorded","live_status":"was_live"}'
+    printf '%s\n' '{"id":"soon0000001","title":"Soon","live_status":"is_upcoming"}'
+    ;;
+esac
+`
+	fake = strings.ReplaceAll(fake, "LIVEPAGE", "'"+resultsURL("topic", Filters{Type: TypeLive})+"'")
+	if err := os.WriteFile(filepath.Join(binDir, "yt-dlp"), []byte(fake), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var mu sync.Mutex
+	found := map[string]bool{}
+	hide := []media.Kind{media.KindLive, media.KindUpcoming, media.KindPastLive, media.KindPlaylist}
+	Search(ctx, "topic", Filters{}, hide, locale.Locale{}, func(event Event) {
+		if event.Kind == EventResult {
+			mu.Lock()
+			found[event.Video.ID] = true
+			mu.Unlock()
+		}
+	})
+	if !found["plain000001"] {
+		t.Error("a plain video must stay")
+	}
+	for _, id := range []string{"onair000001", "vod0000001", "soon0000001"} {
+		if found[id] {
+			t.Errorf("%s is a hidden kind and must not appear", id)
+		}
+	}
+	calls, _ := os.ReadFile(log)
+	if strings.Contains(string(calls), "sp=") {
+		t.Errorf("the live and playlist pages must not be requested, calls:\n%s", calls)
 	}
 }

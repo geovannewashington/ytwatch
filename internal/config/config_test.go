@@ -3,8 +3,11 @@ package config
 import (
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/geovannewashington/ytwatch/internal/media"
 )
 
 func TestParse(t *testing.T) {
@@ -292,5 +295,21 @@ func TestReadmeConfigParsesAndMatchesTheDefaults(t *testing.T) {
 	}
 	if cfg.Theme.Name != "everforest" || cfg.Preview.Output != "auto" {
 		t.Errorf("theme or preview: %+v %+v", cfg.Theme, cfg.Preview)
+	}
+}
+
+func TestParseSearchHide(t *testing.T) {
+	cfg, err := Parse(`[search]
+hide = ["Shorts", "live", "shorts"]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []media.Kind{media.KindShort, media.KindLive}
+	if !slices.Equal(cfg.Search.Hide, want) {
+		t.Errorf("hide = %v, want %v (names ignore case, repeats are dropped)", cfg.Search.Hide, want)
+	}
+	if _, err := Parse(`[search]
+hide = ["videos"]`); err == nil || !strings.Contains(err.Error(), "shorts, playlists") {
+		t.Errorf("an unknown kind should list the valid ones, got %v", err)
 	}
 }

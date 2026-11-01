@@ -105,7 +105,7 @@ func TestSearchAddsShortsToAMixedSearch(t *testing.T) {
 
 	ranks := map[string]int{}
 	var mu sync.Mutex
-	Search(context.Background(), "ranking funny cat moment", Filters{}, locale.Locale{}, func(e Event) {
+	Search(context.Background(), "ranking funny cat moment", Filters{}, nil, locale.Locale{}, func(e Event) {
 		if e.Kind == EventResult {
 			mu.Lock()
 			ranks[e.Video.Title+"/"+e.Video.ID] = e.Rank

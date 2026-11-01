@@ -85,6 +85,25 @@ const (
 	KindPlaylist
 )
 
+// kindNames are the names of the kinds that [search] hide accepts. Plain
+// videos cannot be hidden.
+var kindNames = map[string]Kind{
+	"shorts":    KindShort,
+	"playlists": KindPlaylist,
+	"live":      KindLive,
+	"upcoming":  KindUpcoming,
+	"vods":      KindPastLive,
+}
+
+// KindNames lists the names ParseKind accepts, for messages.
+const KindNames = "shorts, playlists, live, upcoming, vods"
+
+// ParseKind returns the kind with that name (see KindNames).
+func ParseKind(name string) (Kind, bool) {
+	kind, ok := kindNames[strings.ToLower(strings.TrimSpace(name))]
+	return kind, ok
+}
+
 func (v Video) ChannelName() string {
 	if v.Channel != "" {
 		return v.Channel
