@@ -2035,7 +2035,7 @@ func (m *Model) renderResultLines(width, height int) string {
 		} else if v.IsCurrentlyLive() {
 			meta = clean(v.ChannelName()) + " · streaming now"
 			if v.ConcurrentViewers > 0 {
-				meta += " · " + v.ViewsText()
+				meta = clean(v.ChannelName()) + " · " + v.ViewsText() // "watching now"
 			}
 		} else if v.ViewCount > 0 {
 			meta += " · " + v.ViewsText()
@@ -2113,7 +2113,7 @@ func (m *Model) streamSection(v media.Video, width int) ([]string, lipgloss.Styl
 	case media.KindLive:
 		head := "LIVE NOW"
 		if v.ConcurrentViewers > 0 {
-			head += "  " + v.ViewsText()
+			head = "LIVE · " + v.ViewsText() // it already says "now"
 		}
 		hint := "Enter plays"
 		if m.cfg.Chat.Enabled {
@@ -2121,7 +2121,7 @@ func (m *Model) streamSection(v media.Video, width int) ([]string, lipgloss.Styl
 		}
 		return []string{head, hint}, liveBadgeStyle
 	case media.KindUpcoming:
-		return []string{"⏳ UPCOMING  " + v.StartText(time.Now()), "Not live yet · plays once it starts"}, upcomingBadgeStyle
+		return []string{"⏳ UPCOMING · " + v.StartText(time.Now()), "Not live yet · plays once it starts"}, upcomingBadgeStyle
 	case media.KindPastLive:
 		return []string{"📼 LIVE VOD", "Recording of a past live stream"}, pastLiveBadgeStyle
 	case media.KindPlaylist:
@@ -2181,9 +2181,9 @@ func (m *Model) renderPreview(width, height int) string {
 		lines = append(lines, metaStyle.Render(truncate(clean(v.ChannelName()), width)))
 
 		var stats []string
-		if v.IsCurrentlyLive() {
-			stats = append(stats, "streaming now")
-		} else {
+		// A stream on air is announced by the section below, so only the
+		// others show a length here.
+		if !v.IsCurrentlyLive() {
 			if text, ok := durationPart(v); ok {
 				stats = append(stats, text)
 			}

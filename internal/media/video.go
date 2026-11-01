@@ -230,7 +230,7 @@ func (v Video) DurationKnown() bool {
 func (v Video) DurationText() string {
 	if v.IsCurrentlyLive() {
 		if v.ConcurrentViewers > 0 {
-			return "LIVE · " + compactCount(v.ConcurrentViewers) + " watching"
+			return "LIVE · " + compactCount(v.ConcurrentViewers) + " watching now"
 		}
 		return "LIVE NOW"
 	}
@@ -315,12 +315,30 @@ func (v Video) StartText(now time.Time) string {
 
 func (v Video) ViewsText() string {
 	if v.IsCurrentlyLive() && v.ConcurrentViewers > 0 {
-		return compactCount(v.ConcurrentViewers) + " watching"
+		return compactCount(v.ConcurrentViewers) + " watching now"
 	}
 	if v.ViewCount <= 0 {
 		return "views n/a"
 	}
 	return compactCount(v.ViewCount) + " views"
+}
+
+// startedAgo is how long ago a stream started, such as "just now", "25m ago"
+// or "3h ago". It counts minutes, because streams are often young.
+func startedAgo(delta time.Duration) string {
+	switch {
+	case delta < time.Minute:
+		return "just now"
+	case delta < time.Hour:
+		return fmt.Sprintf("%dm ago", int(delta.Minutes()))
+	case delta < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(delta.Hours()))
+	case delta < 30*24*time.Hour:
+		return fmt.Sprintf("%dd ago", int(delta.Hours()/24))
+	case delta < 365*24*time.Hour:
+		return fmt.Sprintf("%dmo ago", int(delta.Hours()/(24*30)))
+	}
+	return fmt.Sprintf("%dy ago", int(delta.Hours()/(24*365)))
 }
 
 func (v Video) AgeText(now time.Time) string {
@@ -342,6 +360,11 @@ func (v Video) AgeText(now time.Time) string {
 	delta := now.Sub(uploaded)
 	if delta < -time.Minute {
 		return "scheduled"
+	}
+	if v.IsCurrentlyLive() {
+		// For a stream on air the date is when it started, which is what the
+		// reader wants to know, so say it. These are YouTube's own words.
+		return "started streaming " + startedAgo(delta)
 	}
 	if delta < time.Hour {
 		return "just now"

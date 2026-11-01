@@ -174,3 +174,34 @@ func TestIsChannelRecognizesChannelEntriesOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestAgeTextSaysWhenALiveStreamStarted(t *testing.T) {
+	now := time.Now()
+	live := func(ago time.Duration) Video {
+		return Video{LiveStatus: "is_live", Timestamp: float64(now.Add(-ago).Unix())}
+	}
+	for ago, want := range map[time.Duration]string{
+		20 * time.Second: "started streaming just now",
+		25 * time.Minute: "started streaming 25m ago",
+		3 * time.Hour:    "started streaming 3h ago",
+		50 * time.Hour:   "started streaming 2d ago",
+	} {
+		if got := live(ago).AgeText(now); got != want {
+			t.Errorf("live for %v: got %q, want %q", ago, got, want)
+		}
+	}
+	recording := Video{Timestamp: float64(now.Add(-3 * time.Hour).Unix())}
+	if got := recording.AgeText(now); got != "3h ago" {
+		t.Errorf("a recording keeps the plain age, got %q", got)
+	}
+}
+
+func TestViewsTextSaysWatchingNowForLiveStreams(t *testing.T) {
+	live := Video{LiveStatus: "is_live", ConcurrentViewers: 41200}
+	if got := live.ViewsText(); got != "41.2K watching now" {
+		t.Errorf("got %q", got)
+	}
+	if got := (Video{ViewCount: 41200}).ViewsText(); got != "41.2K views" {
+		t.Errorf("a recording shows views, got %q", got)
+	}
+}
