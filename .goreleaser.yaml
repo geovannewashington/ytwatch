@@ -1,0 +1,49 @@
+# GoReleaser builds the release when a tag like v0.1.0 is pushed
+# (.github/workflows/release.yml). CI also runs it as a dry run on every push.
+version: 2
+
+project_name: ytwatch
+
+builds:
+  - id: ytwatch
+    main: ./cmd/ytwatch
+    binary: ytwatch
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      # main.version is what "ytwatch --version" prints.
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: ytwatch
+    formats:
+      - tar.gz
+    # install.sh finds the download by this name: ytwatch_<version>_linux_<arch>.tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+release:
+  # The installer is part of the release, so "releases/latest/download/install.sh"
+  # always matches the version it installs.
+  extra_files:
+    - glob: install.sh
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^style:"
+      - "^docs:"
