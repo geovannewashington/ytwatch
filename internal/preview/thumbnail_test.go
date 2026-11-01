@@ -111,3 +111,17 @@ func TestPruneRemovesOldThenOldestOverTheSizeLimit(t *testing.T) {
 func TestPruneMissingFolderIsFine(t *testing.T) {
 	prune(filepath.Join(t.TempDir(), "none"), time.Hour, 1, time.Now())
 }
+
+func TestCacheCurrentExpiresOnlyForStreams(t *testing.T) {
+	now := time.Now()
+	old := now.Add(-3 * LiveTTL)
+	if !cacheCurrent(false, old, now) {
+		t.Error("the thumbnail of a recording stays current")
+	}
+	if cacheCurrent(true, old, now) {
+		t.Error("an old thumbnail of a stream must be fetched again")
+	}
+	if !cacheCurrent(true, now.Add(-LiveTTL/2), now) {
+		t.Error("a recent thumbnail of a stream can be used")
+	}
+}

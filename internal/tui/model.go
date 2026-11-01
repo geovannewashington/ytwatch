@@ -208,6 +208,7 @@ type Model struct {
 
 	metadataDone   bool
 	thumbnailPaths map[string]string
+	thumbLoadedAt  map[string]time.Time // when each thumbnail was downloaded
 	settleSeq      int
 	thumbSequence  int
 	thumbCancel    context.CancelFunc
@@ -254,6 +255,7 @@ func New(initialQuery string) *Model {
 		query:          strings.TrimSpace(initialQuery),
 		status:         "",
 		thumbnailPaths: make(map[string]string),
+		thumbLoadedAt:  make(map[string]time.Time),
 		thumbFailures:  make(map[string]time.Time),
 		thumbAttempts:  make(map[string]int),
 		playing:        make(map[string]string),
@@ -581,7 +583,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case prefetchedMsg:
 		switch {
 		case msg.err == nil && msg.path != "":
-			m.thumbnailPaths[msg.id] = msg.path
+			m.setThumbnail(msg.id, msg.path)
 			if m.selectedID() == msg.id {
 				m.showSelectedThumbnail()
 			}
@@ -612,7 +614,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.thumbCancel = nil
 		}
 		if msg.err == nil && msg.path != "" {
-			m.thumbnailPaths[msg.id] = msg.path
+			m.setThumbnail(msg.id, msg.path)
 			delete(m.thumbFailures, msg.id)
 			m.thumbAttempts[msg.id] = 0
 			if m.selectedID() == msg.id {
@@ -1369,6 +1371,22 @@ func (m *Model) lookUpSelectedDetails() tea.Cmd {
 	}
 }
 
+// setThumbnail remembers the file of a downloaded thumbnail. A refreshed one
+// has the same file name as before, so the overlay is told to send it again.
+func (m *Model) setThumbnail(id, path string) {
+	if _, had := m.thumbnailPaths[id]; had {
+		m.overlay.Invalidate()
+	}
+	m.thumbnailPaths[id] = path
+	m.thumbLoadedAt[id] = time.Now()
+}
+
+// thumbStale reports whether the thumbnail in memory is too old: only streams
+// on air or about to start change theirs.
+func (m *Model) thumbStale(v media.Video) bool {
+	return (v.IsCurrentlyLive() || v.IsUpcoming()) && time.Since(m.thumbLoadedAt[v.ID]) > preview.LiveTTL
+}
+
 func (m *Model) scheduleThumbnailLoad() tea.Cmd {
 	v, ok := m.selectedVideo()
 	if ok && m.thumbLoadingID == v.ID && m.thumbCancel != nil {
@@ -1387,7 +1405,15 @@ func (m *Model) scheduleThumbnailLoad() tea.Cmd {
 	}
 	if path := m.thumbnailPaths[v.ID]; path != "" {
 		m.showSelectedThumbnail()
-		return nil
+		if !m.thumbStale(v) {
+			return nil
+		}
+		// The thumbnail of a stream changes while it is on air: the old one
+		// stays until the new one is downloaded.
+		id := v.ID
+		return tea.Tick(thumbDebounce, func(time.Time) tea.Msg {
+			return thumbnailDelayMsg{id: id, sequence: sequence}
+		})
 	}
 	if failedAt, failed := m.thumbFailures[v.ID]; failed {
 		if time.Since(failedAt) < 2*time.Second {

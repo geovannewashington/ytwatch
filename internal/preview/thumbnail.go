@@ -98,6 +98,16 @@ const cacheVersion = "q2"
 // it: they fail the download so a bad moment does not cache a worse image.
 var errUnusable = errors.New("thumbnail not usable")
 
+// LiveTTL is how long the thumbnail of a stream on air, or one that is about
+// to start, counts as current. YouTube changes these while the video stays the
+// same, so they must not be cached for days like the thumbnail of a recording.
+const LiveTTL = 2 * time.Minute
+
+// cacheCurrent reports whether a cached thumbnail file can still be used.
+func cacheCurrent(live bool, modTime, now time.Time) bool {
+	return !live || now.Sub(modTime) < LiveTTL
+}
+
 // Download saves the best usable thumbnail of v and returns its path.
 func Download(ctx context.Context, v media.Video) (string, error) {
 	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
@@ -112,11 +122,20 @@ func Download(ctx context.Context, v media.Video) (string, error) {
 	}
 
 	destination := filepath.Join(cacheDir, v.ID+"-"+cacheVersion+".jpg")
+	live := v.IsCurrentlyLive() || v.IsUpcoming()
+	stale := "" // an outdated file, used only if the download fails
 	if info, err := os.Stat(destination); err == nil && info.Size() > 0 {
-		// A file in use stays young, so Prune removes unused files first.
 		now := time.Now()
-		_ = os.Chtimes(destination, now, now)
-		return destination, nil
+		if cacheCurrent(live, info.ModTime(), now) {
+			if !live {
+				// A file in use stays young, so Prune removes unused files
+				// first. A live one keeps its age: it is what tells when the
+				// thumbnail must be fetched again.
+				_ = os.Chtimes(destination, now, now)
+			}
+			return destination, nil
+		}
+		stale = destination
 	}
 	var data []byte
 	for _, candidate := range candidates {
@@ -125,12 +144,18 @@ func Download(ctx context.Context, v media.Video) (string, error) {
 			continue
 		}
 		if err != nil {
+			if stale != "" {
+				return stale, nil // an old thumbnail is better than none
+			}
 			return "", err
 		}
 		data = image
 		break
 	}
 	if data == nil {
+		if stale != "" {
+			return stale, nil
+		}
 		return "", errors.New("no usable thumbnail")
 	}
 	// The file name is unique: a prefetch and a normal load of the same

@@ -17,6 +17,7 @@ import (
 	"github.com/geovannewashington/ytwatch/internal/config"
 	"github.com/geovannewashington/ytwatch/internal/history"
 	"github.com/geovannewashington/ytwatch/internal/media"
+	"github.com/geovannewashington/ytwatch/internal/preview"
 	"github.com/geovannewashington/ytwatch/internal/theme"
 	"github.com/geovannewashington/ytwatch/internal/youtube"
 )
@@ -1107,4 +1108,23 @@ func TestNewSearchClearsFiltersButRepeatingKeepsThem(t *testing.T) {
 		t.Error("repeating the search should keep the filters")
 	}
 	m.Close()
+}
+
+func TestOnlyOldThumbnailsOfStreamsAreStale(t *testing.T) {
+	m := New("")
+	live := media.Video{ID: "live0000001", LiveStatus: "is_live"}
+	recording := media.Video{ID: "vod00000001"}
+	m.setThumbnail(live.ID, "/cache/live.jpg")
+	m.setThumbnail(recording.ID, "/cache/vod.jpg")
+	if m.thumbStale(live) {
+		t.Error("a thumbnail just downloaded is not stale")
+	}
+	m.thumbLoadedAt[live.ID] = time.Now().Add(-2 * preview.LiveTTL)
+	m.thumbLoadedAt[recording.ID] = time.Now().Add(-2 * preview.LiveTTL)
+	if !m.thumbStale(live) {
+		t.Error("an old thumbnail of a stream on air is stale")
+	}
+	if m.thumbStale(recording) {
+		t.Error("the thumbnail of a recording never goes stale")
+	}
 }
