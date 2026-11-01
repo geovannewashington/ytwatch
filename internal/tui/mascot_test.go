@@ -69,3 +69,14 @@ func TestEmptyListNamesTheActiveFilters(t *testing.T) {
 		t.Errorf("no filter is on, got %q", got)
 	}
 }
+
+func TestEmptySearchIsNotShownAsAFailure(t *testing.T) {
+	m := New("")
+	m.filters = youtube.Filters{Type: youtube.TypeLive}
+	m.searchMode = false
+	m.handleSearchEvent(youtube.Event{Kind: youtube.EventSearchDone})
+	got := strings.Join(m.renderEmptyList(80, 4), "\n")
+	if strings.Contains(got, "failed") || !strings.Contains(got, "filter: Live") {
+		t.Errorf("an empty search should name the filter, got %q", got)
+	}
+}

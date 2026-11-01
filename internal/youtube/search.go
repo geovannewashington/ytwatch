@@ -171,10 +171,10 @@ func Search(ctx context.Context, query string, filters Filters, loc locale.Local
 				messages = append(messages, result.err.Error())
 			}
 		}
+		// No rows and no failed query is an empty result, not an error. The
+		// interface explains it, including which filters are on.
 		if len(messages) > 0 {
 			searchErr = errors.New(strings.Join(messages, "; "))
-		} else {
-			searchErr = errors.New("no results found")
 		}
 	} else if searchCtx.Err() != nil && ctx.Err() == nil {
 		// Partial results are useful even if a slow search times out.
