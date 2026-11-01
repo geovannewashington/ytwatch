@@ -51,14 +51,24 @@ release() { # release <folder>: lay out the files like GitHub does
 release "$WORK/release"
 
 # Without a terminal the script cannot ask questions, as in a cron job or CI.
+# setsid takes the terminal away. SETSID is the same thing for the commands
+# that are written as text for sh -c.
 SETSID=""
 command -v setsid >/dev/null 2>&1 && SETSID="setsid -w"
+
+detached() {
+	if [ -n "$SETSID" ]; then
+		setsid -w "$@"
+	else
+		"$@"
+	fi
+}
 
 install_sh() { # install_sh <release folder> <install dir> <options...>
 	REL=$1
 	DIR=$2
 	shift 2
-	env YTWATCH_RELEASES_URL="file://$REL" YTWATCH_INSTALL_DIR="$DIR" $SETSID sh "$ROOT/install.sh" "$@"
+	detached env YTWATCH_RELEASES_URL="file://$REL" YTWATCH_INSTALL_DIR="$DIR" sh "$ROOT/install.sh" "$@"
 }
 
 # --- tests -----------------------------------------------------------------
@@ -71,8 +81,8 @@ check "it says the checksum was checked" grep -q "Checksum ok" "$WORK/out1"
 check "no temporary file is left behind" test ! -e "$BIN1/ytwatch.new"
 
 BIN2=$WORK/bin2
-check "installs a chosen version" env VERSION=v9.9.9 YTWATCH_RELEASES_URL="file://$WORK/release" \
-	YTWATCH_INSTALL_DIR="$BIN2" $SETSID sh "$ROOT/install.sh" --no-deps >/dev/null 2>&1
+check "installs a chosen version" detached env VERSION=v9.9.9 YTWATCH_RELEASES_URL="file://$WORK/release" \
+	YTWATCH_INSTALL_DIR="$BIN2" sh "$ROOT/install.sh" --no-deps >/dev/null 2>&1
 check "that version is installed" test -x "$BIN2/ytwatch"
 
 # A damaged download must fail and install nothing.
@@ -108,6 +118,8 @@ export STUB_MARKER="$WORK/marker"
 rm -f "$STUB_MARKER"
 check "without a terminal it does not run the install command" \
 	install_sh "$WORK/stubrel" "$WORK/bin5" >"$WORK/out5" 2>&1
+# The text is meant literally: the stand-in prints it with the $ in place.
+# shellcheck disable=SC2016
 check "it shows the command instead" grep -q 'touch "$STUB_MARKER"' "$WORK/out5"
 check "and the command was not run" test ! -e "$STUB_MARKER"
 
