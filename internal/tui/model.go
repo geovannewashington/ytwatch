@@ -727,9 +727,9 @@ func (m *Model) handleSearchEvent(event youtube.Event) []tea.Cmd {
 			m.searchError = clean(event.Err.Error())
 			m.status = "Search failed" + noteMark + "/ to try again"
 		} else if len(m.items) == 0 && m.filters.Active() {
-			m.status = "No results" + noteMark + "f to change filters"
+			m.status = "No results · f to change filters"
 		} else if len(m.items) == 0 {
-			m.status = "No results" + noteMark + "/ to search"
+			m.status = "No results · / to search"
 		} else {
 			m.status = m.resultsStatus()
 		}
@@ -1863,6 +1863,15 @@ func (m *Model) renderEmptyList(width, height int) []string {
 		message, mood = "Searching...", moodSearching
 	case m.searchDone:
 		message, mood = "No results · / to search again, f to change filters", moodSad
+		if m.filters.Active() {
+			// Say which filters hide the results, or the search looks broken.
+			names := m.filters.Names()
+			label := "filter"
+			if len(names) > 1 {
+				label = "filters"
+			}
+			message = "No results with " + label + ": " + strings.Join(names, ", ") + " · f to change"
+		}
 	}
 	caption := subtitleStyle.Render(truncate(message, width))
 	if height < mascotHeight+4 || width < mascotWidth+2 {

@@ -83,18 +83,21 @@ func (f Filters) DateIgnored() bool { return f.Type == TypeShorts }
 // Active reports whether any filter differs from the default.
 func (f Filters) Active() bool { return f != Filters{} }
 
-// Summary lists the active filters, such as "Live, This week", or ""
-// when there are none.
-func (f Filters) Summary() string {
+// Names lists the active filters, such as ["Live", "This week"].
+func (f Filters) Names() []string {
 	f = f.Applied()
-	var parts []string
+	var names []string
 	for row := range Rows {
 		if option := f.Get(row); option != 0 {
-			parts = append(parts, Rows[row].Options[option])
+			names = append(names, Rows[row].Options[option])
 		}
 	}
-	return strings.Join(parts, ", ")
+	return names
 }
+
+// Summary lists the active filters, such as "Live, This week", or ""
+// when there are none.
+func (f Filters) Summary() string { return strings.Join(f.Names(), ", ") }
 
 // YouTube's own codes for the options above, indexed like Rows. They are the
 // numbers inside the "sp" search parameter, which is a base64 protobuf.

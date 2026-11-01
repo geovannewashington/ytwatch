@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/geovannewashington/ytwatch/internal/youtube"
 )
 
 func TestMascotKeepsItsShapeInEveryPose(t *testing.T) {
@@ -44,5 +47,25 @@ func TestEmptyListFitsItsPaneAndFallsBackToTextWhenSmall(t *testing.T) {
 	}
 	if got := len(m.renderEmptyList(30, 6)); got != 1 {
 		t.Errorf("a small pane shows only the text, got %d lines", got)
+	}
+}
+
+func TestEmptyListNamesTheActiveFilters(t *testing.T) {
+	m := New("")
+	m.searchMode, m.searchDone = false, true
+	m.filters = youtube.Filters{Type: youtube.TypeLive}
+	got := strings.Join(m.renderEmptyList(80, 4), "\n")
+	if !strings.Contains(got, "filter: Live") {
+		t.Errorf("the message should name the filter, got %q", got)
+	}
+	m.filters = youtube.Filters{Type: youtube.TypeLive, Date: 2}
+	got = strings.Join(m.renderEmptyList(80, 4), "\n")
+	if !strings.Contains(got, "filters: Live, ") {
+		t.Errorf("two filters should use the plural, got %q", got)
+	}
+	m.filters = youtube.Filters{}
+	got = strings.Join(m.renderEmptyList(80, 4), "\n")
+	if strings.Contains(got, "filter:") {
+		t.Errorf("no filter is on, got %q", got)
 	}
 }
