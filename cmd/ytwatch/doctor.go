@@ -25,6 +25,8 @@ type probe struct {
 	windowManager func() string
 	clipboard     func() (string, error)
 	browser       func(config.Config) string
+	// tmuxFocusEvents is tmux's focus-events option: "on", "off" or "".
+	tmuxFocusEvents func() string
 }
 
 func systemProbe() probe {
@@ -42,6 +44,13 @@ func systemProbe() probe {
 		windowManager: func() string { return wm.Name(wm.Detect()) },
 		clipboard:     clipboard.Tool,
 		browser:       player.DescribeBrowser,
+		tmuxFocusEvents: func() string {
+			out, err := exec.Command("tmux", "show", "-gv", "focus-events").Output()
+			if err != nil {
+				return ""
+			}
+			return strings.TrimSpace(string(out))
+		},
 	}
 }
 
@@ -79,6 +88,9 @@ func runDoctor(w io.Writer, cfg config.Config, p probe) int {
 		info(w, "thumbnails", "ueberzugpp not installed · no thumbnails (see the Optional list)")
 	default:
 		info(w, "thumbnails", "ueberzugpp, output: "+output)
+		if p.getenv("TMUX") != "" && p.tmuxFocusEvents != nil && p.tmuxFocusEvents() != "on" {
+			info(w, "tmux", "focus-events is off · thumbnails can stay on screen when you change window · add: set -g focus-events on")
+		}
 	}
 	if cfg.Search.Language == "" && cfg.Search.Region == "" {
 		info(w, "search", "language and region chosen by YouTube (set [search] in config.toml)")

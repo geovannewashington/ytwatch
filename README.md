@@ -172,6 +172,10 @@ tries to avoid. Use a browser profile with a separate or throwaway account.
 - **No thumbnails.** Run `ytwatch doctor`. If your terminal runs under another
   display server than your session (an X11 terminal in Wayland), set
   `[preview] output` to `x11` or `wayland`.
+- **The thumbnail shows over other tmux windows or panes.** The image is a
+  separate desktop window, so tmux cannot hide it. ytwatch hides it when the
+  pane loses focus, but tmux only reports that with `set -g focus-events on`
+  in `tmux.conf`. `ytwatch doctor` checks it.
 - **The thumbnail is a tiled window on Hyprland.** Add a window rule, see
   [docs/hyprland.md](docs/hyprland.md).
 - **Results differ from youtube.com.** ytwatch is not logged in, and YouTube

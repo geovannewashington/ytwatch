@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"slices"
 	"strconv"
@@ -181,6 +182,12 @@ type Model struct {
 	focus         paneFocus
 	previewScroll int
 
+	// hideOnBlur hides the thumbnail while the terminal pane has no focus. The
+	// image is a separate desktop window, so tmux cannot hide it when you
+	// change window or pane. It needs tmux's focus-events option.
+	hideOnBlur bool
+	blurred    bool
+
 	countPrefix string
 	pendingG    bool
 
@@ -230,6 +237,7 @@ func New(initialQuery string) *Model {
 		downloading:    make(map[string]string),
 		chatOpened:     make(map[string]bool),
 		overlay:        &preview.Overlay{},
+		hideOnBlur:     os.Getenv("TMUX") != "",
 		cfg:            config.Default(),
 		width:          100, height: 30,
 		historyPos: -1,
@@ -459,9 +467,17 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.redrawThumbnail()
 		}
 		return m, nil
+	case tea.BlurMsg:
+		if m.hideOnBlur {
+			m.blurred = true
+			m.settleSeq++ // queued redraws must not bring the image back
+			m.overlay.Remove()
+		}
+		return m, nil
 	case tea.FocusMsg:
 		// A workspace switch or a floating window can leave the image
 		// misplaced; coming back to the terminal draws it again.
+		m.blurred = false
 		return m, m.settleThumbnail()
 
 	case tea.WindowSizeMsg:
@@ -1426,7 +1442,7 @@ func (m *Model) Attach(send func(tea.Msg)) {
 }
 
 func (m *Model) showSelectedThumbnail() {
-	if m.width < wideWidth || m.splitAnimating() {
+	if m.blurred || m.width < wideWidth || m.splitAnimating() {
 		m.overlay.Remove()
 		return
 	}

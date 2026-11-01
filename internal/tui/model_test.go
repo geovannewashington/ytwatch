@@ -1023,3 +1023,26 @@ func TestStatusNoteIsSeparatedByADot(t *testing.T) {
 		t.Errorf("the note should follow a dot, got %q", got)
 	}
 }
+
+func TestBlurHidesTheThumbnailUntilFocusReturns(t *testing.T) {
+	m := New("")
+	m.hideOnBlur = true
+	m.Update(tea.BlurMsg{})
+	if !m.blurred {
+		t.Fatal("a blur should mark the model as blurred")
+	}
+	seq := m.settleSeq
+	m.Update(tea.FocusMsg{})
+	if m.blurred || m.settleSeq == seq {
+		t.Error("focus should clear the blur and schedule a redraw")
+	}
+}
+
+func TestBlurIsIgnoredOutsideTmux(t *testing.T) {
+	m := New("")
+	m.hideOnBlur = false
+	m.Update(tea.BlurMsg{})
+	if m.blurred {
+		t.Error("outside tmux the image stays when the terminal loses focus")
+	}
+}

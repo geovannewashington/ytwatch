@@ -70,3 +70,19 @@ func TestDoctorThumbnailsOffInConfig(t *testing.T) {
 		t.Fatalf("report should say thumbnails are off:\n%s", out.String())
 	}
 }
+
+func TestDoctorWarnsWhenTmuxFocusEventsAreOff(t *testing.T) {
+	p := fakeProbe(map[string]string{"TMUX": "/tmp/tmux-1000/default,1,0"}, "yt-dlp", "mpv", "ueberzugpp")
+	p.tmuxFocusEvents = func() string { return "off" }
+	var out bytes.Buffer
+	runDoctor(&out, config.Default(), p)
+	if !strings.Contains(out.String(), "focus-events") {
+		t.Errorf("the doctor should mention focus-events, got:\n%s", out.String())
+	}
+	p.tmuxFocusEvents = func() string { return "on" }
+	out.Reset()
+	runDoctor(&out, config.Default(), p)
+	if strings.Contains(out.String(), "focus-events") {
+		t.Errorf("no warning is needed when it is on, got:\n%s", out.String())
+	}
+}
