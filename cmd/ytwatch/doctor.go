@@ -89,7 +89,7 @@ func runDoctor(w io.Writer, cfg config.Config, p probe) int {
 	case !enabled:
 		info(w, "thumbnails", "off in config.toml")
 	case err != nil:
-		info(w, "thumbnails", "ueberzugpp not installed · no thumbnails (see the Optional list)")
+		info(w, "thumbnails", "ueberzugpp not installed · no thumbnails (see the Required list)")
 	default:
 		info(w, "thumbnails", "ueberzugpp, output: "+output)
 		if p.getenv("TMUX") != "" && p.tmuxFocusEvents != nil && p.tmuxFocusEvents() != "on" {
@@ -107,60 +107,84 @@ func runDoctor(w io.Writer, cfg config.Config, p probe) int {
 		)
 	}
 
+	// Everything here is required: without ffmpeg a video download is saved as
+	// two files that are not merged, and without ueberzugpp there are no
+	// thumbnails.
 	missing := 0
 	fmt.Fprintln(w, "\nRequired")
+
 	for _, dep := range []struct{ name, flag, hint string }{
-		{"yt-dlp", "--version", "pacman -S yt-dlp · dnf install yt-dlp · brew install yt-dlp · pipx install yt-dlp (apt's version is often too old for YouTube)"},
+		{
+			"yt-dlp", "--version",
+			"pacman -S yt-dlp · dnf install yt-dlp · brew install yt-dlp · pipx install yt-dlp (apt's version is often too old for YouTube)",
+		},
 		{"mpv", "--version", "install mpv with your package manager"},
+		{
+			"ffmpeg", "-version",
+			"install ffmpeg with your package manager · without it a video download is saved as two files, video and audio, that are not merged",
+		},
 	} {
 		if _, err := p.lookPath(dep.name); err != nil {
 			row(w, "missing", dep.name, dep.hint)
 			missing++
+
 			continue
 		}
+
 		row(w, "ok", dep.name, p.version(dep.name, dep.flag))
 	}
 
-	fmt.Fprintln(w, "\nOptional")
-
-	if tool, err := p.clipboard(); err == nil {
-		row(w, "ok", "clipboard", tool+" (y copies a link)")
+	if _, err := p.lookPath("ueberzugpp"); err == nil {
+		row(w, "ok", "ueberzugpp", p.version("ueberzugpp", "--version"))
+	} else if !enabled {
+		row(w, "ok", "ueberzugpp", "not needed: thumbnails are off in config.toml")
 	} else {
-		row(w, "optional", "clipboard", "install wl-clipboard (Wayland) or xclip / xsel (X11) for y")
+		row(
+			w,
+			"missing",
+			"ueberzugpp",
+			"thumbnails · Arch: pacman -S ueberzugpp · Homebrew: brew install jstkdng/programs/ueberzugpp · other: github.com/jstkdng/ueberzugpp",
+		)
+		missing++
 	}
 
 	if name := p.browser(cfg); name != "" {
 		row(w, "ok", "browser", name+" (o opens links, live chat)")
 	} else {
-		row(w, "optional", "browser", "none found · set [general] browser in config.toml")
+		row(w, "missing", "browser", "none found · install one, or set [general] browser in config.toml")
+		missing++
 	}
 
-	if _, err := p.lookPath("ueberzugpp"); err == nil {
-		row(w, "ok", "ueberzugpp", p.version("ueberzugpp", "--version"))
+	if tool, err := p.clipboard(); err == nil {
+		row(w, "ok", "clipboard", tool+" (y copies a link)")
 	} else {
-		row(w, "optional", "ueberzugpp", "thumbnails · Arch: pacman -S ueberzugpp · Homebrew: brew install jstkdng/programs/ueberzugpp · other: github.com/jstkdng/ueberzugpp")
+		row(w, "missing", "clipboard", "install wl-clipboard (Wayland) or xclip / xsel (X11) for y")
+		missing++
 	}
 
-	if _, err := p.lookPath("ffmpeg"); err == nil {
-		row(w, "ok", "ffmpeg", "downloads can merge video and audio")
-	} else {
-		row(w, "optional", "ffmpeg", "needed to merge video and audio in downloads (audio-only downloads work without it)")
-	}
-
-	if server == "X11" || windows == "" && server != "Wayland" {
+	// i3 has its own way to move windows; other X11 window managers use wmctrl.
+	if server == "X11" && windows != "i3" {
 		if _, err := p.lookPath("wmctrl"); err == nil {
 			row(w, "ok", "wmctrl", "workspace placement on X11")
 		} else {
-			row(w, "optional", "wmctrl", "workspace placement on X11")
+			row(w, "missing", "wmctrl", "workspace placement on X11 · install wmctrl with your package manager")
+			missing++
 		}
 	}
 
 	if missing > 0 {
-		fmt.Fprintf(w, "\n%d required programs missing.\n", missing)
+		noun := "programs"
+		if missing == 1 {
+			noun = "program"
+		}
+
+		fmt.Fprintf(w, "\n%d required %s missing.\n", missing, noun)
+
 		return 1
 	}
 
 	fmt.Fprintln(w, "\nAll required programs found.")
+
 	return 0
 }
 

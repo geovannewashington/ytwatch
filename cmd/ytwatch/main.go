@@ -14,34 +14,12 @@ import (
 	"github.com/geovannewashington/ytwatch/internal/tui"
 )
 
-const version = "0.2.0"
-
-const usage = `ytwatch - search YouTube from your terminal
-
-Usage:
-  ytwatch [search query]
-  ytwatch doctor          check the programs and session ytwatch uses
-
-Examples:
-  ytwatch
-  ytwatch Go interfaces
-  ytwatch live coding Go
-
-Dependencies:
-  yt-dlp, mpv
-  Optional: ueberzugpp (thumbnails), a web browser (links, live chat),
-    wl-clipboard (Wayland) or xclip / xsel (X11) for copying,
-    wmctrl (workspace placement on X11), ffmpeg (merging downloads)
-
-Config: ~/.config/ytwatch/config.toml (theme, workspaces, mpv args,
-  download folder, link handlers, thumbnail output)
-
-Inside ytwatch, press ? for keyboard help.`
+const version = "0.1.0"
 
 func main() {
 	args := os.Args[1:]
 	if len(args) == 1 && (args[0] == "-h" || args[0] == "--help" || args[0] == "help") {
-		fmt.Println(usage)
+		printHelp(version)
 		return
 	}
 

@@ -22,14 +22,14 @@ func fakeProbe(env map[string]string, installed ...string) probe {
 		},
 		version:       func(program, _ string) string { return program + " 1.0" },
 		windowManager: func() string { return "" },
-		clipboard:     func() (string, error) { return "", errors.New("none") },
-		browser:       func(config.Config) string { return "" },
+		clipboard:     func() (string, error) { return "wl-copy", nil },
+		browser:       func(config.Config) string { return "firefox" },
 	}
 }
 
 func TestDoctorAllRequiredFound(t *testing.T) {
 	var out bytes.Buffer
-	p := fakeProbe(map[string]string{"DISPLAY": ":0"}, "yt-dlp", "mpv", "ueberzugpp")
+	p := fakeProbe(map[string]string{"DISPLAY": ":0"}, "yt-dlp", "mpv", "ffmpeg", "ueberzugpp", "wmctrl")
 	p.windowManager = func() string { return "bspwm" }
 	code := runDoctor(&out, config.Default(), p)
 
@@ -54,7 +54,7 @@ func TestDoctorReportsMissingRequiredPrograms(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
 	}
-	for _, want := range []string{"missing", "yt-dlp", "pipx install yt-dlp", "mpv", "2 required programs missing", "console or SSH"} {
+	for _, want := range []string{"missing", "yt-dlp", "pipx install yt-dlp", "mpv", "ffmpeg", "ueberzugpp", "4 required programs missing", "console or SSH"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("report is missing %q:\n%s", want, text)
 		}
@@ -84,5 +84,56 @@ func TestDoctorWarnsWhenTmuxFocusEventsAreOff(t *testing.T) {
 	runDoctor(&out, config.Default(), p)
 	if strings.Contains(out.String(), "focus-events") {
 		t.Errorf("no warning is needed when it is on, got:\n%s", out.String())
+	}
+}
+
+func TestDoctorTreatsEveryProgramAsRequired(t *testing.T) {
+	var out bytes.Buffer
+	p := fakeProbe(map[string]string{"DISPLAY": ":0"}, "yt-dlp", "mpv")
+	p.browser = func(config.Config) string { return "" }
+	p.clipboard = func() (string, error) { return "", errors.New("none") }
+
+	code := runDoctor(&out, config.Default(), p)
+	text := out.String()
+
+	if code != 1 {
+		t.Errorf("a missing program must fail the doctor, exit code %d", code)
+	}
+
+	for _, name := range []string{"ffmpeg", "ueberzugpp", "browser", "clipboard", "wmctrl"} {
+		if !strings.Contains(text, "missing  "+name) {
+			t.Errorf("%s should be reported as missing:\n%s", name, text)
+		}
+	}
+
+	if !strings.Contains(text, "5 required programs missing") {
+		t.Errorf("the summary should count all of them:\n%s", text)
+	}
+	if strings.Contains(text, "Optional") || strings.Contains(text, "Recommended") {
+		t.Errorf("there are no lesser tiers:\n%s", text)
+	}
+}
+
+func TestDoctorDoesNotNeedUeberzugppWhenThumbnailsAreOff(t *testing.T) {
+	cfg := config.Default()
+	cfg.Preview.Output = "off"
+
+	var out bytes.Buffer
+	code := runDoctor(&out, cfg, fakeProbe(map[string]string{"WAYLAND_DISPLAY": "w"}, "yt-dlp", "mpv", "ffmpeg"))
+
+	if code != 0 || !strings.Contains(out.String(), "not needed: thumbnails are off") {
+		t.Errorf("ueberzugpp is not needed with thumbnails off, exit code %d:\n%s", code, out.String())
+	}
+}
+
+func TestDoctorDoesNotAskForWmctrlOnI3(t *testing.T) {
+	p := fakeProbe(map[string]string{"DISPLAY": ":0"}, "yt-dlp", "mpv", "ffmpeg", "ueberzugpp")
+	p.windowManager = func() string { return "i3" }
+
+	var out bytes.Buffer
+	code := runDoctor(&out, config.Default(), p)
+
+	if code != 0 || strings.Contains(out.String(), "wmctrl") {
+		t.Errorf("i3 moves windows itself, exit code %d:\n%s", code, out.String())
 	}
 }
