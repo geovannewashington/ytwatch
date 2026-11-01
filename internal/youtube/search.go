@@ -632,10 +632,11 @@ func runPlaylistQuery(
 // playlistPreviewVideos is how many videos a playlist lookup lists.
 const playlistPreviewVideos = 3
 
-// FetchDetailsBatch looks up the details of videos with as few yt-dlp runs as
-// possible (one for the videos, one for the playlists) and calls found for
-// each one as soon as it arrives. It returns an error only when yt-dlp could
-// not run or gave nothing.
+// FetchDetailsBatch looks up the details of videos and calls found for each
+// one as soon as it arrives. Videos are read from their watch pages, a few at a
+// time, which is quick and uses almost no CPU. Playlists, and videos whose page
+// cannot be read, go to yt-dlp, with as few runs as possible. It returns an
+// error only when yt-dlp was needed and could not run or gave nothing.
 func FetchDetailsBatch(
 	parent context.Context,
 	videos []media.Video,
@@ -653,6 +654,18 @@ func FetchDetailsBatch(
 			singles = append(singles, v)
 		}
 	}
+
+	// Videos with an ID that does not look like a video ID are not put in a
+	// page address; yt-dlp handles them.
+	var readable, unreadable []media.Video
+	for _, v := range singles {
+		if v.HasVideoID() {
+			readable = append(readable, v)
+		} else {
+			unreadable = append(unreadable, v)
+		}
+	}
+	singles = append(unreadable, fetchWatchDetails(parent, readable, loc, found)...)
 
 	var firstErr error
 	for _, group := range [][]media.Video{singles, playlists} {

@@ -219,6 +219,13 @@ func TestFetchDetailsBatchUsesOneRunForSeveralVideos(t *testing.T) {
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
+	// No watch page can be read, so yt-dlp is asked, once, about both videos.
+	oldFetch := fetchResultsPage
+	defer func() { fetchResultsPage = oldFetch }()
+	fetchResultsPage = func(context.Context, string, locale.Locale) ([]byte, error) {
+		return nil, errors.New("offline")
+	}
+
 	videos := []media.Video{{ID: "aaaaaaaaaaa", Title: "a"}, {ID: "bbbbbbbbbbb", Title: "b"}}
 	got := map[string]float64{}
 	err := FetchDetailsBatch(context.Background(), videos, locale.Locale{}, func(v media.Video) {

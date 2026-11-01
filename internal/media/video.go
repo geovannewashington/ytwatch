@@ -196,6 +196,10 @@ func (v Video) IsShort() bool {
 }
 
 // IsPlaylist reports whether the result is a playlist instead of one video.
+// HasVideoID reports whether the ID has the form of a YouTube video ID, so it
+// is safe to put in a watch page address.
+func (v Video) HasVideoID() bool { return validVideoID.MatchString(v.ID) }
+
 // IsChannel reports whether the entry is a channel and not a video. yt-dlp's
 // search can return the channel that matches the query as its first result.
 func (v Video) IsChannel() bool {
@@ -436,6 +440,9 @@ func MergeDetails(base, details Video) Video {
 	}
 	if details.ChannelURL != "" {
 		base.ChannelURL = details.ChannelURL
+	}
+	if details.ChannelID != "" {
+		base.ChannelID = details.ChannelID
 	}
 	if details.Uploader != "" {
 		base.Uploader = details.Uploader
