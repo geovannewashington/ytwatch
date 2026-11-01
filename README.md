@@ -83,7 +83,7 @@ mpv keeps playing if you quit ytwatch. Press `?` for help.
 | `Enter` `B` | Play (a whole playlist too) / browse a playlist |
 | `V` | Select several results, then `Enter` plays and `d` downloads them |
 | `d` `a` `Q` | Download / audio only / quality |
-| `f` | Filters: type, duration, date |
+| `f` | Filters: type, duration, date. A new search clears them, `r` keeps them |
 | `o` `y` | Open / copy the video link. With a number (`3o`): description link 3 |
 | `u` | Undo the last play or download |
 | `t` | Next color theme |

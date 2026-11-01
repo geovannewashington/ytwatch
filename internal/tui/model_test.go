@@ -1086,3 +1086,25 @@ func TestPrefetchTargetsStayInsideTheListAndSkipKnownRows(t *testing.T) {
 		t.Errorf("at the end of the list, got %s", got)
 	}
 }
+
+func TestNewSearchClearsFiltersButRepeatingKeepsThem(t *testing.T) {
+	m := New("")
+	m.query = "old"
+	m.searchMode = true
+	m.setInput("new query")
+	m.filters = youtube.Filters{Type: youtube.TypeLive}
+	m.handleSearchInput(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.filters.Active() {
+		t.Errorf("a new search should clear the filters, got %+v", m.filters)
+	}
+	m.Close()
+
+	m = New("")
+	m.query = "old"
+	m.filters = youtube.Filters{Type: youtube.TypeLive}
+	m.beginSearch(m.query) // what r and applying the filter menu do
+	if !m.filters.Active() {
+		t.Error("repeating the search should keep the filters")
+	}
+	m.Close()
+}

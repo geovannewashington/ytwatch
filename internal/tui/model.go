@@ -868,6 +868,9 @@ func (m *Model) handleSearchInput(msg tea.KeyMsg) tea.Cmd {
 			m.status = "Nothing to search"
 			return nil
 		}
+		// Like on YouTube, a new search starts without filters. Applying
+		// filters and repeating a search with r keep them.
+		m.filters = youtube.Filters{}
 		return m.beginSearch(query)
 	case "esc":
 		m.searchMode = false
