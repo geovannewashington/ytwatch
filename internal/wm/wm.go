@@ -46,9 +46,11 @@ func detectX11() Backend {
 	if !isSet("DISPLAY") || isSet("WAYLAND_DISPLAY") || !hasBinary("wmctrl") {
 		return nil
 	}
+
 	if hasBinary("bspc") && exec.Command("bspc", "query", "-M").Run() == nil {
 		return bspwm{}
 	}
+
 	return ewmh{}
 }
 
@@ -66,12 +68,15 @@ func Snapshot(b Backend) map[string]Window {
 	if b == nil {
 		return nil
 	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
+
 	windows, err := b.Windows(ctx)
 	if err != nil {
 		return nil
 	}
+
 	return windows
 }
 
@@ -88,8 +93,10 @@ func MoveNew(b Backend, before map[string]Window, match func(Window) bool, works
 	if b == nil || workspace == "" || before == nil {
 		return
 	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), moveTimeout)
 	defer cancel()
+
 	for {
 		current, err := b.Windows(ctx)
 		if err == nil {
@@ -100,6 +107,7 @@ func MoveNew(b Backend, before map[string]Window, match func(Window) bool, works
 				}
 			}
 		}
+
 		select {
 		case <-ctx.Done():
 			return

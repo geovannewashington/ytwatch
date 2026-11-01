@@ -24,6 +24,7 @@ func candidates(getenv func(string) string) [][]string {
 	if getenv("WAYLAND_DISPLAY") != "" {
 		return append(append([][]string{}, wayland...), x11...)
 	}
+
 	return append(append([][]string{}, x11...), wayland...)
 }
 
@@ -34,6 +35,7 @@ func pick(getenv func(string) string, lookPath func(string) (string, error)) ([]
 			return argv, nil
 		}
 	}
+
 	return nil, ErrNoTool
 }
 
@@ -43,6 +45,7 @@ func Tool() (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	return argv[0], nil
 }
 
@@ -54,11 +57,13 @@ func Copy(text string) error {
 	if err != nil {
 		return err
 	}
+
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Stdin = strings.NewReader(text)
 	if err := cmd.Start(); err != nil {
 		return err
 	}
 	go func() { _ = cmd.Wait() }()
+
 	return nil
 }

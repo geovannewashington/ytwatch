@@ -26,22 +26,26 @@ func Annotate(text string) (string, []string) {
 		numbers = map[string]int{}
 		last    int
 	)
+
 	for _, loc := range urlPattern.FindAllStringIndex(text, -1) {
 		start, end := loc[0], loc[1]
 		url := trimTrailing(text[start:end])
 		end = start + len(url)
+
 		number, seen := numbers[url]
 		if !seen {
 			urls = append(urls, url)
 			number = len(urls)
 			numbers[url] = number
 		}
+
 		out.WriteString(text[last:start])
 		out.WriteString("[" + strconv.Itoa(number) + "] ")
 		out.WriteString(url)
 		last = end
 	}
 	out.WriteString(text[last:])
+
 	return out.String(), urls
 }
 
@@ -58,6 +62,7 @@ func trimTrailing(url string) string {
 		}
 		url = url[:len(url)-1]
 	}
+
 	return url
 }
 
@@ -74,6 +79,7 @@ func Command(url string, handlers []config.LinkHandler) (argv []string, name str
 			return argv, h.Name, true
 		}
 	}
+
 	return nil, "", false
 }
 
@@ -83,15 +89,18 @@ func Run(argv []string) error {
 	if len(argv) == 0 {
 		return fmt.Errorf("empty link command")
 	}
+
 	path, err := exec.LookPath(argv[0])
 	if err != nil {
 		return fmt.Errorf("%s is not installed", argv[0])
 	}
+
 	cmd := exec.Command(path, argv[1:]...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start %s: %w", argv[0], err)
 	}
 	go func() { _ = cmd.Wait() }()
+
 	return nil
 }

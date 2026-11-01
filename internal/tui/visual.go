@@ -59,9 +59,11 @@ func (s skipped) text() string {
 	if s.unplayable > 0 {
 		parts = append(parts, plural(s.unplayable, "result")+" without a link")
 	}
+
 	if len(parts) == 0 {
 		return ""
 	}
+
 	return "skipped " + strings.Join(parts, ", ")
 }
 
@@ -78,6 +80,7 @@ func plural(n int, word string) string {
 // filtered here, so it keeps its own messages.
 func (m *Model) selectedVideos(forDownload bool) ([]media.Video, skipped) {
 	lo, hi := m.selection()
+
 	var out []media.Video
 	var skip skipped
 	for i := lo; i <= hi && i < len(m.items); i++ {
@@ -93,6 +96,7 @@ func (m *Model) selectedVideos(forDownload bool) ([]media.Video, skipped) {
 			out = append(out, v)
 		}
 	}
+
 	return out, skip
 }
 
@@ -103,5 +107,6 @@ func (m *Model) visualStatus() string {
 	if _, skip := m.selectedVideos(false); skip.playlists > 0 {
 		text += " (" + skip.text() + ")"
 	}
+
 	return text
 }

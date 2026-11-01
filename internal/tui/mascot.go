@@ -40,6 +40,7 @@ func mascotRows(mood mascotMood, step int) []string {
 	case moodSad:
 		mouth = "─"
 	}
+
 	return []string{
 		antennae,
 		"╭─────╮",
@@ -55,10 +56,13 @@ func mascotRows(mood mascotMood, step int) []string {
 func renderMascot(width int, mood mascotMood, step int) []string {
 	rows := mascotRows(mood, step/2)
 	out := make([]string, len(rows))
+
 	for i, row := range rows {
 		var b strings.Builder
+
 		for col, r := range []rune(row) {
 			text := string(r)
+
 			switch {
 			case r == ' ':
 				b.WriteString(text)
@@ -72,7 +76,9 @@ func renderMascot(width int, mood mascotMood, step int) []string {
 				b.WriteString(playlistBadgeStyle.Render(text))
 			}
 		}
+
 		out[i] = lipgloss.PlaceHorizontal(width, lipgloss.Center, b.String())
 	}
+
 	return out
 }

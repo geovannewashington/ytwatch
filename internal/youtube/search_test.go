@@ -125,7 +125,13 @@ esac
 	if _, found := rank["junk000001"]; found {
 		t.Error("a video from the live query that is not live must be dropped")
 	}
-	order := []string{"first000001", "second00001", "third000001", "PLplaylist000000000000000000000001", "stream00001"}
+	order := []string{
+		"first000001",
+		"second00001",
+		"third000001",
+		"PLplaylist000000000000000000000001",
+		"stream00001",
+	}
 	for i := 1; i < len(order); i++ {
 		a, aok := rank[order[i-1]]
 		b, bok := rank[order[i]]
@@ -151,7 +157,14 @@ func TestSearchPassesTheLocaleToYtDlpAndTheShortsPage(t *testing.T) {
 		return nil, errors.New("offline")
 	}
 
-	Search(context.Background(), "topic", Filters{}, nil, locale.Locale{Language: "pt-BR", Region: "BR"}, func(Event) {})
+	Search(
+		context.Background(),
+		"topic",
+		Filters{},
+		nil,
+		locale.Locale{Language: "pt-BR", Region: "BR"},
+		func(Event) {},
+	)
 
 	data, _ := os.ReadFile(log)
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
@@ -378,7 +391,13 @@ esac
 }
 
 func TestHiddenKindsAreLeftOutUnlessTheFilterAsksForThem(t *testing.T) {
-	all := []media.Kind{media.KindShort, media.KindPlaylist, media.KindLive, media.KindUpcoming, media.KindPastLive}
+	all := []media.Kind{
+		media.KindShort,
+		media.KindPlaylist,
+		media.KindLive,
+		media.KindUpcoming,
+		media.KindPastLive,
+	}
 	got := hiddenKinds(all, Filters{})
 	for _, kind := range all {
 		if !got[kind] {
@@ -454,7 +473,10 @@ func TestFetchCountAsksForMoreOnlyWhenStreamsOrRecordingsAreHidden(t *testing.T)
 	if got := fetchCount(ResultLimit, nil); got != ResultLimit {
 		t.Errorf("nothing hidden: got %d", got)
 	}
-	if got := fetchCount(ResultLimit, map[media.Kind]bool{media.KindShort: true, media.KindPlaylist: true}); got != ResultLimit {
+	if got := fetchCount(
+		ResultLimit,
+		map[media.Kind]bool{media.KindShort: true, media.KindPlaylist: true},
+	); got != ResultLimit {
 		t.Errorf("Shorts and playlists come from other queries, so no extra: got %d", got)
 	}
 	if got := fetchCount(ResultLimit, map[media.Kind]bool{media.KindPastLive: true}); got != ResultLimit*3/2 {

@@ -50,36 +50,46 @@ func Load(path string, maxAge time.Duration, maxEntries int, now time.Time) *Sto
 	if path == "" {
 		return s
 	}
+
 	file, err := os.Open(path)
 	if err != nil {
 		return s
 	}
 	defer file.Close()
+
 	total := 0
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
+
 	for scanner.Scan() {
 		total++
+
 		seconds, query, ok := strings.Cut(scanner.Text(), "\t")
 		// Older versions stored the / that opens the search as part of the query.
 		query = strings.TrimSpace(strings.TrimLeft(query, "/"))
+
 		unix, err := strconv.ParseInt(seconds, 10, 64)
 		if !ok || err != nil || strings.TrimSpace(query) == "" {
 			continue
 		}
+
 		when := time.Unix(unix, 0)
 		if now.Sub(when) > maxAge || when.After(now.Add(24*time.Hour)) {
 			continue
 		}
+
 		s.entries = append(s.entries, Entry{Query: query, When: when})
 	}
+
 	s.entries = dedupe(s.entries)
 	s.trim()
+
 	// If reading stopped early, do not write back a shortened list: that would
 	// delete the lines that were not read.
 	if scanner.Err() == nil && len(s.entries) != total {
 		s.save()
 	}
+
 	return s
 }
 
@@ -109,15 +119,18 @@ func (s *Store) Queries() []string {
 func dedupe(entries []Entry) []Entry {
 	seen := make(map[string]bool, len(entries))
 	out := make([]Entry, 0, len(entries))
+
 	for i := len(entries) - 1; i >= 0; i-- {
 		if !seen[entries[i].Query] {
 			seen[entries[i].Query] = true
 			out = append(out, entries[i])
 		}
 	}
+
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 		out[i], out[j] = out[j], out[i]
 	}
+
 	return out
 }
 
@@ -133,14 +146,17 @@ func (s *Store) save() {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
 		return
 	}
+
 	var b strings.Builder
 	for _, e := range s.entries {
 		b.WriteString(strconv.FormatInt(e.When.Unix(), 10) + "\t" + e.Query + "\n")
 	}
+
 	temp := s.path + ".tmp"
 	if err := os.WriteFile(temp, []byte(b.String()), 0o600); err != nil {
 		return
 	}
+
 	if err := os.Rename(temp, s.path); err != nil {
 		_ = os.Remove(temp)
 	}

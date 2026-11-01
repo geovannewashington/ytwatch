@@ -21,15 +21,18 @@ func (lister) Windows(ctx context.Context) (map[string]Window, error) {
 
 // parseWmctrl parses "wmctrl -l -x" lines: id, desktop, class, host, title.
 func parseWmctrl(out string) map[string]Window {
+
 	windows := make(map[string]Window)
 	for _, line := range strings.Split(out, "\n") {
 		fields, title := splitFields(line, 4)
 		if len(fields) < 4 {
 			continue
 		}
+
 		id := fields[0]
 		windows[id] = Window{ID: id, Title: title, App: fields[2]}
 	}
+
 	return windows
 }
 
@@ -38,6 +41,7 @@ func parseWmctrl(out string) map[string]Window {
 func splitFields(line string, n int) ([]string, string) {
 	var fields []string
 	rest := strings.TrimLeft(line, " \t")
+
 	for len(fields) < n && rest != "" {
 		i := strings.IndexAny(rest, " \t")
 		if i < 0 {
@@ -45,9 +49,11 @@ func splitFields(line string, n int) ([]string, string) {
 			rest = ""
 			break
 		}
+
 		fields = append(fields, rest[:i])
 		rest = strings.TrimLeft(rest[i:], " \t")
 	}
+
 	return fields, rest
 }
 
@@ -62,6 +68,7 @@ func (ewmh) Move(ctx context.Context, id, workspace string) error {
 	if err != nil || n < 1 {
 		return err
 	}
+
 	return exec.CommandContext(ctx, "wmctrl", "-i", "-r", id, "-t", strconv.Itoa(n-1)).Run()
 }
 

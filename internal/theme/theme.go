@@ -100,11 +100,14 @@ func Resolve(name string, overrides map[string]string) (Theme, error) {
 		if !slices.Contains(Roles, role) {
 			return Theme{}, fmt.Errorf("unknown colour %q (roles: %s)", role, strings.Join(Roles, ", "))
 		}
+
 		if !ValidColor(value) {
 			return Theme{}, InvalidColorError(value)
 		}
+
 		t.Colors[role] = value
 	}
+
 	return t, nil
 }
 

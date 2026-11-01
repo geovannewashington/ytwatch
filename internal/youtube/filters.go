@@ -27,9 +27,21 @@ type Row struct {
 // Rows describes the filters, in the order the menu shows them. Option 0 of
 // every row is the default.
 var Rows = []Row{
-	{"Type", []string{"Any", "Videos", "Shorts", "Live", "Playlists"}, "What to search for. Live: streams happening now."},
-	{"Duration", []string{"Any", "Under 4 minutes", "4 - 20 minutes", "Over 20 minutes"}, "How long the video is."},
-	{"Upload date", []string{"Any", "Today", "This week", "This month", "This year"}, "When the video was published."},
+	{
+		"Type",
+		[]string{"Any", "Videos", "Shorts", "Live", "Playlists"},
+		"What to search for. Live: streams happening now.",
+	},
+	{
+		"Duration",
+		[]string{"Any", "Under 4 minutes", "4 - 20 minutes", "Over 20 minutes"},
+		"How long the video is.",
+	},
+	{
+		"Upload date",
+		[]string{"Any", "Today", "This week", "This month", "This year"},
+		"When the video was published.",
+	},
 }
 
 // Row indexes, for use with Get and Set.
@@ -111,9 +123,11 @@ var (
 func (f Filters) Param() string {
 	f = f.Applied()
 	var inner []byte
+
 	if code := dateCodes[f.Date]; code != 0 {
 		inner = append(inner, 0x08, code) // field 1: upload date
 	}
+
 	typeCode := typeCodes[f.Type]
 	if typeCode == 0 && (f.Duration != 0 || f.Date != 0) {
 		// These filters only apply to videos. Say so, so that channels and
@@ -132,6 +146,7 @@ func (f Filters) Param() string {
 	if len(inner) == 0 {
 		return ""
 	}
+
 	out := append([]byte{0x12, byte(len(inner))}, inner...) // field 2: the filters
 	return base64.StdEncoding.EncodeToString(out)
 }

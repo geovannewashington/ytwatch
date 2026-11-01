@@ -83,7 +83,11 @@ func TestStartNeedsAVideo(t *testing.T) {
 
 func TestStartEscapesDollarInTheTitle(t *testing.T) {
 	out := fakeMPV(t)
-	p, err := Start([]media.Video{{ID: "video0001", Title: "Cost: ${media-title} $5"}}, config.Default(), Options{})
+	p, err := Start(
+		[]media.Video{{ID: "video0001", Title: "Cost: ${media-title} $5"}},
+		config.Default(),
+		Options{},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -32,6 +32,7 @@ func ExpandDir(dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	return filepath.Join(home, strings.TrimPrefix(dir, "~")), nil
 }
 
@@ -44,15 +45,19 @@ func buildArgs(url, dir string, cfg config.Config, opts Options) []string {
 		"--no-simulate", "--print", "after_move:filepath",
 		"-P", dir, "-o", fileTemplate,
 	}
+
 	if opts.AudioOnly {
 		args = append(args, "-f", audioFormat)
 	} else if format := quality.Format(opts.Quality); format != "" {
 		args = append(args, "-f", format)
 	}
+
 	if cfg.MPV.CookiesFromBrowser != "" {
 		args = append(args, "--cookies-from-browser", cfg.MPV.CookiesFromBrowser)
 	}
+
 	args = append(args, cfg.Download.Args...)
+
 	return append(args, "--", url)
 }
 
@@ -69,44 +74,55 @@ func Run(ctx context.Context, v media.Video, cfg config.Config, opts Options) (s
 	if v.IsPlaylist() {
 		return "", errors.New("playlists cannot be downloaded yet")
 	}
+
 	if v.IsCurrentlyLive() || v.IsUpcoming() {
 		return "", errors.New("live and upcoming streams cannot be downloaded")
 	}
+
 	url := v.CanonicalURL()
 	if url == "" {
 		return "", errors.New("this result has no downloadable URL")
 	}
+
 	dir, err := ExpandDir(cfg.Download.Dir)
 	if err != nil {
 		return "", err
 	}
+
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("create download folder: %w", err)
 	}
+
 	cmd := exec.CommandContext(ctx, "yt-dlp", buildArgs(url, dir, cfg, opts)...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
+
 		return "", errors.New(failureReason(stderr.String(), err))
 	}
+
 	return lastLine(stdout.String()), nil
 }
 
 // failureReason picks the last "ERROR:" line of yt-dlp's output.
 func failureReason(stderr string, err error) string {
 	lines := strings.Split(stderr, "\n")
+
 	for i := len(lines) - 1; i >= 0; i-- {
 		if rest, ok := strings.CutPrefix(strings.TrimSpace(lines[i]), "ERROR:"); ok {
 			reason := strings.TrimSpace(rest)
 			if strings.Contains(reason, "Sign in to confirm") {
 				return "YouTube blocked yt-dlp; set cookies_from_browser under [mpv] in config.toml"
 			}
+
 			return reason
 		}
 	}
+
 	return err.Error()
 }
 

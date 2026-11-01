@@ -44,11 +44,13 @@ func parseShorts(page []byte) ([]media.Video, error) {
 	if start < 0 {
 		return nil, errors.New("unexpected results page")
 	}
+
 	var data any
 	decoder := json.NewDecoder(bytes.NewReader(page[start+len(initialDataMarker):]))
 	if err := decoder.Decode(&data); err != nil {
 		return nil, fmt.Errorf("read results page: %w", err)
 	}
+
 	type entry struct {
 		index float64
 		video media.Video
@@ -64,6 +66,7 @@ func parseShorts(page []byte) ([]media.Video, error) {
 					found = append(found, entry{index, v})
 				}
 			}
+
 			for _, child := range n {
 				walk(child)
 			}
@@ -76,6 +79,7 @@ func parseShorts(page []byte) ([]media.Video, error) {
 	walk(data)
 	// Decoded maps have no order, so restore the order of the page.
 	sort.SliceStable(found, func(i, j int) bool { return found[i].index < found[j].index })
+
 	var videos []media.Video
 	seen := map[string]bool{}
 	for _, e := range found {
@@ -84,6 +88,7 @@ func parseShorts(page []byte) ([]media.Video, error) {
 			videos = append(videos, e.video)
 		}
 	}
+
 	return videos, nil
 }
 
@@ -92,6 +97,7 @@ func shortFromLockup(lockup map[string]any) (media.Video, bool) {
 	if id == "" {
 		return media.Video{}, false
 	}
+
 	title := text(lockup, "overlayMetadata", "primaryText", "content")
 	if title == "" {
 		// "Title, 16 million views - play Short"
@@ -103,6 +109,7 @@ func shortFromLockup(lockup map[string]any) (media.Video, bool) {
 	if title == "" {
 		title = "Untitled Short"
 	}
+
 	return media.Video{
 		ID:         id,
 		Title:      title,
@@ -147,6 +154,7 @@ const (
 func shortRanking(query string) func(position int, title string) int {
 	words := queryWords(query)
 	exact := strings.Join(words, " ")
+
 	return func(position int, title string) int {
 		if exact != "" && strings.Join(queryWords(title), " ") == exact {
 			return -1
@@ -157,6 +165,7 @@ func shortRanking(query string) func(position int, title string) int {
 		if position == 0 {
 			return shortFirstRank
 		}
+
 		return shortGroupBase + position*3
 	}
 }
@@ -190,15 +199,18 @@ var fetchResultsPage = func(ctx context.Context, pageURL string, loc locale.Loca
 	request.Header.Set("Accept-Language", loc.AcceptLanguage())
 	// Skips the cookie consent page that some regions get.
 	request.Header.Set("Cookie", "SOCS=CAI")
+
 	client := &http.Client{Timeout: 15 * time.Second}
 	response, err := client.Do(request)
 	if err != nil {
 		return nil, err
 	}
 	defer response.Body.Close()
+
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("youtube returned %s", response.Status)
 	}
+
 	return io.ReadAll(io.LimitReader(response.Body, 16*1024*1024))
 }
 
@@ -228,6 +240,7 @@ func runShortsQuery(
 	if limit > 0 && len(shorts) > limit {
 		shorts = shorts[:limit]
 	}
+
 	for position, short := range shorts {
 		if ctx.Err() != nil {
 			break
@@ -235,11 +248,18 @@ func runShortsQuery(
 		if _, duplicate := seen.LoadOrStore(short.ID, struct{}{}); duplicate {
 			continue
 		}
-		emit(Event{Kind: EventResult, Video: short, Count: int(uniqueCount.Add(1)), Rank: rank(position, short.Title)})
+		emit(Event{
+			Kind:  EventResult,
+			Video: short,
+			Count: int(uniqueCount.Add(1)),
+			Rank:  rank(position, short.Title),
+		})
+
 		select {
 		case jobs <- short:
 		case <-ctx.Done():
 		}
 	}
+
 	return queryResult{rows: len(shorts)}
 }

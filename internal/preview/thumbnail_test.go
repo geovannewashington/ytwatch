@@ -51,7 +51,10 @@ func TestFetchImageSkipsMissingAndWebP(t *testing.T) {
 			t.Errorf("%s: err = %v, want errUnusable", path, err)
 		}
 	}
-	if _, err := fetchImage(context.Background(), server.URL+"/error"); err == nil || errors.Is(err, errUnusable) {
+	if _, err := fetchImage(
+		context.Background(),
+		server.URL+"/error",
+	); err == nil || errors.Is(err, errUnusable) {
 		t.Errorf("a server error must fail, not fall through: %v", err)
 	}
 }
@@ -66,7 +69,12 @@ func TestResolveOutput(t *testing.T) {
 		output  string
 		enabled bool
 	}{
-		"auto on wayland":           {"auto", map[string]string{"WAYLAND_DISPLAY": "wayland-1", "DISPLAY": ":0"}, "wayland", true},
+		"auto on wayland": {
+			"auto",
+			map[string]string{"WAYLAND_DISPLAY": "wayland-1", "DISPLAY": ":0"},
+			"wayland",
+			true,
+		},
 		"empty means auto on x11":   {"", map[string]string{"DISPLAY": ":0"}, "x11", true},
 		"auto without display":      {"auto", nil, "", true},
 		"off":                       {"off", map[string]string{"DISPLAY": ":0"}, "", false},

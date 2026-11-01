@@ -31,6 +31,7 @@ func parseClients(data []byte) (map[string]Window, error) {
 	if err := json.Unmarshal(data, &clients); err != nil {
 		return nil, err
 	}
+
 	windows := make(map[string]Window, len(clients))
 	for _, c := range clients {
 		if !c.Mapped || c.Address == "" {
@@ -38,6 +39,7 @@ func parseClients(data []byte) (map[string]Window, error) {
 		}
 		windows[c.Address] = Window{ID: c.Address, Title: c.Title, App: c.Class}
 	}
+
 	return windows, nil
 }
 
@@ -56,11 +58,13 @@ func (hyprland) Move(ctx context.Context, id, workspace string) error {
 	if legacyErr == nil {
 		return nil
 	}
+
 	lua := fmt.Sprintf("hl.dispatch(hl.dsp.window.move({ workspace = %s, follow = false, window = %s }))",
 		luaString(workspace), luaString("address:"+id))
 	if err := hyprctl(ctx, "eval", lua); err != nil {
 		return errors.Join(legacyErr, err)
 	}
+
 	return nil
 }
 

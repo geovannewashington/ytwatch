@@ -121,9 +121,11 @@ func (v Video) CanonicalURL() string {
 			return candidate
 		}
 	}
+
 	if validVideoID.MatchString(v.ID) {
 		return "https://www.youtube.com/watch?v=" + v.ID
 	}
+
 	return ""
 }
 
@@ -141,18 +143,22 @@ func (v Video) ThumbnailCandidates() []string {
 		}
 		out = append(out, raw)
 	}
+
 	if video {
 		add("https://i.ytimg.com/vi/" + v.ID + "/hq720.jpg")
 	}
+
 	listed := slices.Clone(v.Thumbnails)
 	slices.SortStableFunc(listed, func(a, b ThumbnailRef) int { return b.Width - a.Width })
 	for _, t := range listed {
 		add(t.URL)
 	}
+
 	add(v.Thumbnail)
 	if video {
 		add("https://i.ytimg.com/vi/" + v.ID + "/mqdefault.jpg")
 	}
+
 	return out
 }
 
@@ -178,9 +184,14 @@ func (v Video) IsPastLive() bool {
 // Short from an ordinary short video, so portrait dimensions or a /shorts/ URL
 // are required unless yt-dlp explicitly reports media_type=short.
 func (v Video) IsShort() bool {
-	if v.Short || strings.EqualFold(v.MediaType, "short") || strings.Contains(strings.ToLower(v.WebpageURL), "/shorts/") || strings.Contains(strings.ToLower(v.OriginalURL), "/shorts/") || strings.Contains(strings.ToLower(v.URL), "/shorts/") {
+	if v.Short ||
+		strings.EqualFold(v.MediaType, "short") ||
+		strings.Contains(strings.ToLower(v.WebpageURL), "/shorts/") ||
+		strings.Contains(strings.ToLower(v.OriginalURL), "/shorts/") ||
+		strings.Contains(strings.ToLower(v.URL), "/shorts/") {
 		return true
 	}
+
 	return v.Duration > 0 && v.Duration <= 180 && v.Height > v.Width && v.Width > 0
 }
 
@@ -254,9 +265,11 @@ func FormatDuration(duration float64) string {
 	hours := seconds / 3600
 	minutes := (seconds % 3600) / 60
 	secs := seconds % 60
+
 	if hours > 0 {
 		return fmt.Sprintf("%d:%02d:%02d", hours, minutes, secs)
 	}
+
 	return fmt.Sprintf("%d:%02d", minutes, secs)
 }
 
@@ -301,6 +314,7 @@ func (v Video) StartText(now time.Time) string {
 	}
 	start := time.Unix(int64(v.ReleaseTimestamp), 0)
 	delta := start.Sub(now)
+
 	switch {
 	case delta <= 0:
 		return "starting now"
@@ -353,6 +367,7 @@ func (v Video) AgeText(now time.Time) string {
 			uploaded = parsed
 		}
 	}
+
 	if uploaded.IsZero() {
 		return "date n/a"
 	}
@@ -361,11 +376,13 @@ func (v Video) AgeText(now time.Time) string {
 	if delta < -time.Minute {
 		return "scheduled"
 	}
+
 	if v.IsCurrentlyLive() {
 		// For a stream on air the date is when it started, which is what the
 		// reader wants to know, so say it. These are YouTube's own words.
 		return "started streaming " + startedAgo(delta)
 	}
+
 	if delta < time.Hour {
 		return "just now"
 	}
@@ -398,6 +415,7 @@ func compactCount(n int64) string {
 // replacing useful fields with zero values from partial extractor output.
 func MergeDetails(base, details Video) Video {
 	base.Detailed = true
+
 	if details.ID != "" {
 		base.ID = details.ID
 	}
@@ -482,5 +500,6 @@ func MergeDetails(base, details Video) Video {
 	if len(details.Entries) > 0 {
 		base.Entries = details.Entries
 	}
+
 	return base
 }

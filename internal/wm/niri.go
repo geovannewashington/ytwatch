@@ -28,11 +28,13 @@ func parseNiriWindows(data []byte) (map[string]Window, error) {
 	if err := json.Unmarshal(data, &list); err != nil {
 		return nil, err
 	}
+
 	windows := make(map[string]Window, len(list))
 	for _, w := range list {
 		id := strconv.FormatUint(w.ID, 10)
 		windows[id] = Window{ID: id, Title: w.Title, App: w.AppID}
 	}
+
 	return windows, nil
 }
 

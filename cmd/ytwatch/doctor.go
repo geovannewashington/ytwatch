@@ -60,6 +60,7 @@ func runDoctor(w io.Writer, cfg config.Config, p probe) int {
 	fmt.Fprintln(w, "ytwatch doctor")
 
 	fmt.Fprintln(w, "\nSession")
+
 	server := "none (a console or SSH session)"
 	switch {
 	case p.getenv("WAYLAND_DISPLAY") != "":
@@ -68,6 +69,7 @@ func runDoctor(w io.Writer, cfg config.Config, p probe) int {
 		server = "X11"
 	}
 	info(w, "display server", server)
+
 	windows := p.windowManager()
 	switch {
 	case windows != "":
@@ -77,10 +79,12 @@ func runDoctor(w io.Writer, cfg config.Config, p probe) int {
 	default:
 		info(w, "window manager", "none supported · windows are not moved (sway, i3, Hyprland, niri, bspwm and X11 work)")
 	}
+
 	output, enabled := preview.ResolveOutput(cfg.Preview.Output, p.getenv)
 	if output == "" {
 		output = "chosen by ueberzugpp"
 	}
+
 	switch _, err := p.lookPath("ueberzugpp"); {
 	case !enabled:
 		info(w, "thumbnails", "off in config.toml")
@@ -92,10 +96,15 @@ func runDoctor(w io.Writer, cfg config.Config, p probe) int {
 			info(w, "tmux", "focus-events is off · thumbnails can stay on screen when you change window · add: set -g focus-events on")
 		}
 	}
+
 	if cfg.Search.Language == "" && cfg.Search.Region == "" {
 		info(w, "search", "language and region chosen by YouTube (set [search] in config.toml)")
 	} else {
-		info(w, "search", "language "+cmp.Or(cfg.Search.Language, "default")+", region "+cmp.Or(cfg.Search.Region, "default"))
+		info(
+			w,
+			"search",
+			"language "+cmp.Or(cfg.Search.Language, "default")+", region "+cmp.Or(cfg.Search.Region, "default"),
+		)
 	}
 
 	missing := 0
@@ -113,26 +122,31 @@ func runDoctor(w io.Writer, cfg config.Config, p probe) int {
 	}
 
 	fmt.Fprintln(w, "\nOptional")
+
 	if tool, err := p.clipboard(); err == nil {
 		row(w, "ok", "clipboard", tool+" (y copies a link)")
 	} else {
 		row(w, "optional", "clipboard", "install wl-clipboard (Wayland) or xclip / xsel (X11) for y")
 	}
+
 	if name := p.browser(cfg); name != "" {
 		row(w, "ok", "browser", name+" (o opens links, live chat)")
 	} else {
 		row(w, "optional", "browser", "none found · set [general] browser in config.toml")
 	}
+
 	if _, err := p.lookPath("ueberzugpp"); err == nil {
 		row(w, "ok", "ueberzugpp", p.version("ueberzugpp", "--version"))
 	} else {
 		row(w, "optional", "ueberzugpp", "thumbnails · Arch: pacman -S ueberzugpp · Homebrew: brew install jstkdng/programs/ueberzugpp · other: github.com/jstkdng/ueberzugpp")
 	}
+
 	if _, err := p.lookPath("ffmpeg"); err == nil {
 		row(w, "ok", "ffmpeg", "downloads can merge video and audio")
 	} else {
 		row(w, "optional", "ffmpeg", "needed to merge video and audio in downloads (audio-only downloads work without it)")
 	}
+
 	if server == "X11" || windows == "" && server != "Wayland" {
 		if _, err := p.lookPath("wmctrl"); err == nil {
 			row(w, "ok", "wmctrl", "workspace placement on X11")
@@ -145,6 +159,7 @@ func runDoctor(w io.Writer, cfg config.Config, p probe) int {
 		fmt.Fprintf(w, "\n%d required programs missing.\n", missing)
 		return 1
 	}
+
 	fmt.Fprintln(w, "\nAll required programs found.")
 	return 0
 }

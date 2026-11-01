@@ -237,9 +237,17 @@ type queryResult struct {
 // because only that page supports them. All of them stream flat results
 // immediately; richer metadata is resolved by a bounded worker pool so stream
 // status and Shorts details can update later.
-func Search(ctx context.Context, query string, filters Filters, hide []media.Kind, loc locale.Locale, emit func(Event)) {
+func Search(
+	ctx context.Context,
+	query string,
+	filters Filters,
+	hide []media.Kind,
+	loc locale.Locale,
+	emit func(Event),
+) {
 	hidden := hiddenKinds(hide, filters)
 	query = strings.TrimSpace(query)
+
 	if query == "" {
 		emit(Event{Kind: EventSearchDone, Err: errors.New("enter a search query")})
 		emit(Event{Kind: EventDetailsEnd})
@@ -256,55 +264,143 @@ func Search(ctx context.Context, query string, filters Filters, hide []media.Kin
 	var seen sync.Map
 	var uniqueCount atomic.Int64
 	var searchWG sync.WaitGroup
+
 	// The live page has nothing to show when live and upcoming are hidden.
 	skipLive := hidden[media.KindLive] && hidden[media.KindUpcoming]
+
 	// The main query and the live page can each return the matched channel.
 	sources := 2
 	if skipLive {
 		sources = 1
 	}
 	channel := newTopChannel(query, sources)
+
 	var queries []func() queryResult
 	if filters.Active() {
 		if filters.Type == TypeShorts {
 			queries = append(queries, func() queryResult {
-				return runShortsQuery(searchCtx, query, filters, loc, 0, func(position int, _ string) int { return mainRanking.at(position) }, &seen, &uniqueCount, regularJobs, emit)
+				return runShortsQuery(
+					searchCtx,
+					query,
+					filters,
+					loc,
+					0,
+					func(position int, _ string) int { return mainRanking.at(position) },
+					&seen,
+					&uniqueCount,
+					regularJobs,
+					emit,
+				)
 			})
 		} else if filters.Type == TypePlaylists {
 			queries = append(queries, func() queryResult {
-				return runPlaylistQuery(searchCtx, resultsURL(query, filters), filteredPlaylistCount, loc, mainRanking, &seen, &uniqueCount, liveJobs, emit)
+				return runPlaylistQuery(
+					searchCtx,
+					resultsURL(query, filters),
+					filteredPlaylistCount,
+					loc,
+					mainRanking,
+					&seen,
+					&uniqueCount,
+					liveJobs,
+					emit,
+				)
 			})
 		} else {
 			queries = append(queries, func() queryResult {
-				return runQuery(searchCtx, resultsURL(query, filters), fetchCount(filteredResultCount, hidden), loc, mainRanking, filters.Type == TypeLive, nil, hidden, &seen, &uniqueCount, regularJobs, liveJobs, emit)
+				return runQuery(
+					searchCtx,
+					resultsURL(query, filters),
+					fetchCount(filteredResultCount, hidden),
+					loc,
+					mainRanking,
+					filters.Type == TypeLive,
+					nil,
+					hidden,
+					&seen,
+					&uniqueCount,
+					regularJobs,
+					liveJobs,
+					emit,
+				)
 			})
 		}
 	} else {
 		queries = append(queries, func() queryResult {
-			return runQuery(searchCtx, fmt.Sprintf("ytsearch%d:%s", fetchCount(videoResultCount, hidden), query), 0, loc, mainRanking, false, channel, hidden, &seen, &uniqueCount, regularJobs, liveJobs, emit)
+			return runQuery(
+				searchCtx,
+				fmt.Sprintf("ytsearch%d:%s", fetchCount(videoResultCount, hidden), query),
+				0,
+				loc,
+				mainRanking,
+				false,
+				channel,
+				hidden,
+				&seen,
+				&uniqueCount,
+				regularJobs,
+				liveJobs,
+				emit,
+			)
 		})
 		if !skipLive {
 			queries = append(queries, func() queryResult {
 				// The results page filtered to live streams, in YouTube's own
 				// order. The normal search misses streams that YouTube shows
 				// in a "live now" card, and has no viewer-based order.
-				return runQuery(searchCtx, resultsURL(query, Filters{Type: TypeLive}), liveResultCount, loc, liveRanking, true, channel, hidden, &seen, &uniqueCount, regularJobs, liveJobs, emit)
+				return runQuery(
+					searchCtx,
+					resultsURL(query, Filters{Type: TypeLive}),
+					liveResultCount,
+					loc,
+					liveRanking,
+					true,
+					channel,
+					hidden,
+					&seen,
+					&uniqueCount,
+					regularJobs,
+					liveJobs,
+					emit,
+				)
 			})
 		}
 		// Hidden kinds are not even requested.
 		if !hidden[media.KindPlaylist] {
 			queries = append(queries, func() queryResult {
-				return runPlaylistQuery(searchCtx, playlistSearchURL(query), playlistCount, loc, playlistRanking, &seen, &uniqueCount, liveJobs, emit)
+				return runPlaylistQuery(
+					searchCtx,
+					playlistSearchURL(query),
+					playlistCount,
+					loc,
+					playlistRanking,
+					&seen,
+					&uniqueCount,
+					liveJobs,
+					emit,
+				)
 			})
 		}
 		if !hidden[media.KindShort] {
 			queries = append(queries, func() queryResult {
 				// yt-dlp's search never returns Shorts, so they come from the
 				// Shorts results page.
-				return runShortsQuery(searchCtx, query, Filters{Type: TypeShorts}, loc, shortResultCount, shortRanking(query), &seen, &uniqueCount, regularJobs, emit)
+				return runShortsQuery(
+					searchCtx,
+					query,
+					Filters{Type: TypeShorts},
+					loc,
+					shortResultCount,
+					shortRanking(query),
+					&seen,
+					&uniqueCount,
+					regularJobs,
+					emit,
+				)
 			})
 		}
 	}
+
 	queryResults := make(chan queryResult, len(queries))
 	for _, run := range queries {
 		searchWG.Add(1)
@@ -322,6 +418,7 @@ func Search(ctx context.Context, query string, filters Filters, hide []media.Kin
 	for i := range results {
 		results[i] = <-queryResults
 	}
+
 	var searchErr error
 	if uniqueCount.Load() == 0 {
 		var messages []string
@@ -349,7 +446,12 @@ func Search(ctx context.Context, query string, filters Filters, hide []media.Kin
 // results: stream status, Shorts, description and age. Jobs on live are served
 // first, and jobs are taken in batches that share one yt-dlp run. The pool ends
 // when both channels are closed and empty.
-func startDetailWorkers(ctx context.Context, regularJobs, liveJobs <-chan media.Video, loc locale.Locale, emit func(Event)) *sync.WaitGroup {
+func startDetailWorkers(
+	ctx context.Context,
+	regularJobs, liveJobs <-chan media.Video,
+	loc locale.Locale,
+	emit func(Event),
+) *sync.WaitGroup {
 	var workers sync.WaitGroup
 	for i := 0; i < metadataWorkers; i++ {
 		workers.Add(1)
@@ -449,6 +551,7 @@ func runQuery(
 		}
 	}
 	defer checkedChannel()
+
 	args := []string{
 		"--flat-playlist", "--dump-json", "--no-warnings", "--ignore-errors",
 		"--skip-download", "--socket-timeout", "7",
@@ -460,11 +563,13 @@ func runQuery(
 	}
 	args = append(args, loc.YtDlpArgs()...)
 	args = append(args, source)
+
 	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return queryResult{err: err}
 	}
+
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
@@ -496,6 +601,7 @@ func runQuery(
 		if rows >= channelLookahead {
 			checkedChannel() // no channel among the first results
 		}
+
 		if unavailable(video.Title) {
 			continue
 		}
@@ -505,6 +611,7 @@ func runQuery(
 		if hidden[video.Kind()] {
 			continue
 		}
+
 		if video.Title == "" {
 			video.Title = "Untitled video"
 		}
@@ -547,6 +654,7 @@ func runQuery(
 			}
 		}
 	}
+
 	scanErr := scanner.Err()
 	waitErr := cmd.Wait()
 	if scanErr != nil {
@@ -559,6 +667,7 @@ func runQuery(
 		}
 		return queryResult{err: errors.New(message)}
 	}
+
 	return queryResult{rows: rows}
 }
 
@@ -588,11 +697,13 @@ func runPlaylistQuery(
 		"--playlist-end", strconv.Itoa(limit),
 	}
 	args = append(args, loc.YtDlpArgs()...)
+
 	cmd := exec.CommandContext(ctx, "yt-dlp", append(args, source)...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return queryResult{err: err}
 	}
+
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
@@ -608,19 +719,30 @@ func runPlaylistQuery(
 			break
 		}
 		var playlist media.Video
-		if err := json.Unmarshal(scanner.Bytes(), &playlist); err != nil || playlist.ID == "" || !playlist.IsPlaylist() {
+		if err := json.Unmarshal(scanner.Bytes(), &playlist); err != nil ||
+			playlist.ID == "" ||
+			!playlist.IsPlaylist() {
 			continue
 		}
+
 		position := rows
 		rows++
+
 		if _, duplicate := seen.LoadOrStore(playlist.ID, struct{}{}); !duplicate {
-			emit(Event{Kind: EventResult, Video: playlist, Count: int(uniqueCount.Add(1)), Rank: order.at(position)})
+			emit(Event{
+				Kind:  EventResult,
+				Video: playlist,
+				Count: int(uniqueCount.Add(1)),
+				Rank:  order.at(position),
+			})
+
 			select {
 			case jobs <- playlist:
 			case <-ctx.Done():
 			}
 		}
 	}
+
 	scanErr := scanner.Err()
 	waitErr := cmd.Wait()
 	if scanErr != nil {
@@ -633,6 +755,7 @@ func runPlaylistQuery(
 		}
 		return queryResult{err: errors.New(message)}
 	}
+
 	return queryResult{rows: rows}
 }
 
@@ -643,8 +766,14 @@ const playlistPreviewVideos = 3
 // possible (one for the videos, one for the playlists) and calls found for
 // each one as soon as it arrives. It returns an error only when yt-dlp could
 // not run or gave nothing.
-func FetchDetailsBatch(parent context.Context, videos []media.Video, loc locale.Locale, found func(media.Video)) error {
+func FetchDetailsBatch(
+	parent context.Context,
+	videos []media.Video,
+	loc locale.Locale,
+	found func(media.Video),
+) error {
 	var singles, playlists []media.Video
+
 	for _, v := range videos {
 		switch {
 		case v.CanonicalURL() == "":
@@ -654,6 +783,7 @@ func FetchDetailsBatch(parent context.Context, videos []media.Video, loc locale.
 			singles = append(singles, v)
 		}
 	}
+
 	var firstErr error
 	for _, group := range [][]media.Video{singles, playlists} {
 		if len(group) == 0 {
@@ -663,11 +793,17 @@ func FetchDetailsBatch(parent context.Context, videos []media.Video, loc locale.
 			firstErr = err
 		}
 	}
+
 	return firstErr
 }
 
 // fetchGroup runs yt-dlp once for videos that are all playlists or all not.
-func fetchGroup(parent context.Context, group []media.Video, loc locale.Locale, found func(media.Video)) error {
+func fetchGroup(
+	parent context.Context,
+	group []media.Video,
+	loc locale.Locale,
+	found func(media.Video),
+) error {
 	ctx, cancel := context.WithTimeout(parent, 9*time.Second+time.Duration(len(group)-1)*6*time.Second)
 	defer cancel()
 
@@ -681,7 +817,8 @@ func fetchGroup(parent context.Context, group []media.Video, loc locale.Locale, 
 		// A flat lookup of the first videos is quick and still reports the
 		// playlist's size, update date and description.
 		args = []string{
-			"--flat-playlist", "--dump-single-json", "--no-warnings", "--no-progress", "--ignore-errors",
+			"--flat-playlist", "--dump-single-json", "--no-warnings", "--no-progress",
+			"--ignore-errors",
 			"--playlist-end", strconv.Itoa(playlistPreviewVideos),
 			"--socket-timeout", "6", "--extractor-retries", "1", "--retries", "1",
 		}
@@ -694,16 +831,19 @@ func fetchGroup(parent context.Context, group []media.Video, loc locale.Locale, 
 		youtubeArgs = []string{"player_skip=js,configs", "player_client=web"}
 	}
 	args = append(loc.YtDlpArgs(youtubeArgs...), args...)
+
 	byID := make(map[string]media.Video, len(group))
 	for _, v := range group {
 		byID[v.ID] = v
 		args = append(args, v.CanonicalURL())
 	}
+
 	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
 	}
+
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
@@ -727,6 +867,7 @@ func fetchGroup(parent context.Context, group []media.Video, loc locale.Locale, 
 		found(media.MergeDetails(base, details))
 	}
 	waitErr := cmd.Wait()
+
 	if got == 0 {
 		if ctx.Err() != nil {
 			return ctx.Err()

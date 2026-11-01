@@ -39,7 +39,10 @@ var newWindowBrowsers = []string{
 // from "xdg-settings get default-web-browser"), then xdg-open. A configured
 // browser that is missing is an error instead of falling back, so a typo is
 // not hidden.
-func resolveBrowser(configured, envBrowser, desktop string, lookPath func(string) (string, error)) (chatBrowser, error) {
+func resolveBrowser(
+	configured, envBrowser, desktop string,
+	lookPath func(string) (string, error),
+) (chatBrowser, error) {
 	if fields := strings.Fields(configured); len(fields) > 0 {
 		path, err := lookPath(fields[0])
 		if err != nil {
@@ -47,6 +50,7 @@ func resolveBrowser(configured, envBrowser, desktop string, lookPath func(string
 		}
 		return newChatBrowser(path, fields[0], fields[1:]), nil
 	}
+
 	for _, entry := range strings.Split(envBrowser, ":") {
 		fields := withoutPlaceholder(strings.Fields(entry))
 		if len(fields) == 0 {
@@ -56,6 +60,7 @@ func resolveBrowser(configured, envBrowser, desktop string, lookPath func(string
 			return newChatBrowser(path, fields[0], fields[1:]), nil
 		}
 	}
+
 	if name := strings.TrimSuffix(strings.TrimSpace(desktop), ".desktop"); name != "" {
 		candidates := []string{name}
 		if alias, ok := desktopAlias[name]; ok {
@@ -67,10 +72,12 @@ func resolveBrowser(configured, envBrowser, desktop string, lookPath func(string
 			}
 		}
 	}
+
 	path, err := lookPath("xdg-open")
 	if err != nil {
 		return chatBrowser{}, fmt.Errorf("no browser found: set chat.browser in config.toml")
 	}
+
 	return chatBrowser{path: path}, nil
 }
 
@@ -82,18 +89,21 @@ func withoutPlaceholder(fields []string) []string {
 			out = append(out, f)
 		}
 	}
+
 	return out
 }
 
 func newChatBrowser(path, command string, extra []string) chatBrowser {
 	name := strings.ToLower(filepath.Base(command))
 	b := chatBrowser{path: path, args: append([]string(nil), extra...)}
+
 	for _, known := range newWindowBrowsers {
 		if strings.Contains(name, known) {
 			b.newWindow = true
 			break
 		}
 	}
+
 	b.name = strings.TrimSuffix(strings.TrimSuffix(name, "-stable"), "-bin")
 	return b
 }

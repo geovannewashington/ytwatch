@@ -18,7 +18,11 @@ func TestKind(t *testing.T) {
 		{"live flag", Video{ID: "abc12345", IsLive: true}, KindLive},
 		{"upcoming", Video{ID: "abc12345", LiveStatus: "is_upcoming"}, KindUpcoming},
 		{"past live", Video{ID: "abc12345", LiveStatus: "was_live"}, KindPastLive},
-		{"short path", Video{ID: "abc12345", WebpageURL: "https://www.youtube.com/shorts/abc12345", Duration: 40}, KindShort},
+		{
+			"short path",
+			Video{ID: "abc12345", WebpageURL: "https://www.youtube.com/shorts/abc12345", Duration: 40},
+			KindShort,
+		},
 		{"portrait short", Video{ID: "abc12345", Duration: 40, Width: 720, Height: 1280}, KindShort},
 		{"short duration is not enough", Video{ID: "abc12345", Duration: 40, Width: 1280, Height: 720}, KindVideo},
 	}

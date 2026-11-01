@@ -18,6 +18,7 @@ func Valid(name string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -39,6 +40,7 @@ func Format(name string) string {
 	if !ok || !Valid(Normalize(name)) {
 		return ""
 	}
+
 	limit := "[height<=" + height + "]"
 	return "bestvideo" + limit + "+bestaudio/best" + limit + "/best"
 }

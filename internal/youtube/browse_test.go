@@ -61,7 +61,11 @@ esac
 	if got := strings.Join(ids, ","); got != "first000001,second00001,fourth00001" {
 		t.Fatalf("videos = %s", got)
 	}
-	if len(done) != 2 || done[0].Kind != EventSearchDone || done[0].Err != nil || done[0].Count != 3 || done[1].Kind != EventDetailsEnd {
+	if len(done) != 2 ||
+		done[0].Kind != EventSearchDone ||
+		done[0].Err != nil ||
+		done[0].Count != 3 ||
+		done[1].Kind != EventDetailsEnd {
 		t.Fatalf("end events = %+v", done)
 	}
 }

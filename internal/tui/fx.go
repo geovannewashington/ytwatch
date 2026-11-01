@@ -64,6 +64,7 @@ func (m *Model) fxObserve() {
 	if m.animations < animFull {
 		return
 	}
+
 	now := m.now()
 	if id := m.selectedID(); id != m.fx.curID {
 		if m.fx.curID != "" {
@@ -71,6 +72,7 @@ func (m *Model) fxObserve() {
 		}
 		m.fx.curID = id
 	}
+
 	if m.status != m.fx.status {
 		m.fx.status, m.fx.statusAt = m.status, now
 	}
@@ -81,15 +83,19 @@ func (m *Model) fxSchedule() tea.Cmd {
 	if m.fx.ticking {
 		return nil
 	}
+
 	fast, slow := m.fxWant()
 	if !fast && !slow {
 		return nil
 	}
+
 	interval := fxSlow
 	if fast {
 		interval = fxFast
 	}
+
 	m.fx.ticking = true
+
 	return tea.Tick(interval, func(time.Time) tea.Msg { return fxMsg{} })
 }
 
@@ -98,28 +104,35 @@ func (m *Model) fxWant() (fast, slow bool) {
 	if m.animations == animOff {
 		return false, false
 	}
+
 	now := m.now()
 	if m.searching && !m.searchMode || len(m.downloading) > 0 {
 		fast = true
 	}
+
 	if m.animations < animFull {
 		return fast, false
 	}
+
 	for _, start := range m.fx.arrived {
 		if now.Before(start.Add(2 * fadeStep)) {
 			fast = true
 			break
 		}
 	}
+
 	if m.fx.prevID != "" && now.Sub(m.fx.prevAt) < 2*fadeStep {
 		fast = true
 	}
+
 	if m.status != "" && now.Sub(m.fx.statusAt) < 2*fadeStep {
 		fast = true
 	}
+
 	if m.splitAnimating() {
 		fast = true
 	}
+
 	return fast, !fast && m.liveVisible()
 }
 
@@ -156,9 +169,11 @@ func (m *Model) markArrived(id string) {
 	if m.animations < animFull {
 		return
 	}
+
 	if m.fx.arrived == nil {
 		m.fx.arrived = map[string]time.Time{}
 	}
+
 	delay := time.Duration(min(m.fx.arrivals, maxStaggerRows)) * rowStagger
 	m.fx.arrivals++
 	m.fx.arrived[id] = m.now().Add(delay)
@@ -176,12 +191,14 @@ func (m *Model) rowFade(id string) (phase int, fading bool) {
 	if m.animations < animFull {
 		return 2, false
 	}
+
 	now := m.now()
 	if start, ok := m.fx.arrived[id]; ok {
 		if p := fadePhase(now.Sub(start)); p < 2 {
 			return p, true
 		}
 	}
+
 	if id == m.fx.prevID && m.fx.prevID != "" {
 		// The highlight fades out: the same steps, bright first.
 		if p := fadePhase(now.Sub(m.fx.prevAt)); p < 2 {
@@ -225,7 +242,10 @@ func (m *Model) dressUndo(status string) string {
 type undoExpiredMsg struct{}
 
 func undoExpiry() tea.Cmd {
-	return tea.Tick(undoWindow+50*time.Millisecond, func(time.Time) tea.Msg { return undoExpiredMsg{} })
+	return tea.Tick(
+		undoWindow+50*time.Millisecond,
+		func(time.Time) tea.Msg { return undoExpiredMsg{} },
+	)
 }
 
 // liveDim is true during the dim half of the LIVE badge pulse.
@@ -237,6 +257,7 @@ func (m *Model) liveDim() bool {
 func (m *Model) liveVisible() bool {
 	visible := max(1, (m.bodyHeight()-1)/2)
 	top := min(max(0, m.top), len(m.items))
+
 	for i := top; i < min(len(m.items), top+visible); i++ {
 		if m.items[i].IsCurrentlyLive() {
 			return true
@@ -250,10 +271,12 @@ func (m *Model) splitProgress() float64 {
 	if m.animations < animFull || m.fx.splitAt.IsZero() {
 		return 1
 	}
+
 	t := float64(m.now().Sub(m.fx.splitAt)) / float64(splitDuration)
 	if t >= 1 {
 		return 1
 	}
+
 	return 1 - (1-t)*(1-t) // starts fast and slows down
 }
 

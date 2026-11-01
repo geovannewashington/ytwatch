@@ -22,7 +22,10 @@ const (
 type marqueeMsg struct{}
 
 func tickMarquee() tea.Cmd {
-	return tea.Tick(marqueeInterval, func(time.Time) tea.Msg { return marqueeMsg{} })
+	return tea.Tick(
+		marqueeInterval,
+		func(time.Time) tea.Msg { return marqueeMsg{} },
+	)
 }
 
 // marqueeOffset is how many cells a title of loopCells cells has scrolled
@@ -43,6 +46,7 @@ func scrollWindow(s string, width, offset int) string {
 		r rune
 		w int
 	}
+
 	var cells []cell
 	total := 0
 	for _, r := range s + marqueeGap {
@@ -50,6 +54,7 @@ func scrollWindow(s string, width, offset int) string {
 		cells = append(cells, cell{r, w})
 		total += w
 	}
+
 	if width <= 0 || total == 0 {
 		return ""
 	}
@@ -60,6 +65,7 @@ func scrollWindow(s string, width, offset int) string {
 		position += cells[i].w
 		i++
 	}
+
 	var b strings.Builder
 	used := 0
 	if position < offset { // the window starts inside a wide character
@@ -68,6 +74,7 @@ func scrollWindow(s string, width, offset int) string {
 		used += pad
 		i++
 	}
+
 	for used < width {
 		if i >= len(cells) {
 			i = 0
@@ -81,6 +88,7 @@ func scrollWindow(s string, width, offset int) string {
 		used += c.w
 		i++
 	}
+
 	return b.String()
 }
 
@@ -91,10 +99,12 @@ func (m *Model) marqueeText(text string, width int) string {
 	if textWidth <= width {
 		return text
 	}
+
 	offset := marqueeOffset(m.marqueeStep, textWidth+lipgloss.Width(marqueeGap))
 	if offset == 0 {
 		return truncate(text, width)
 	}
+
 	return scrollWindow(text, width, offset)
 }
 
@@ -110,12 +120,14 @@ func (m *Model) needsTick() bool {
 	if !ok {
 		return false
 	}
+
 	title := lipgloss.Width(clean(v.Title))
 	results, preview := m.paneWidths()
 	// A badge or the playlist mark takes some of the row, so allow for them.
 	if title > results-2-maxRowDecoration {
 		return true
 	}
+
 	return preview > 0 && title > preview
 }
 

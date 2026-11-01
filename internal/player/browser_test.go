@@ -18,7 +18,12 @@ func fakeLookPath(installed ...string) func(string) (string, error) {
 }
 
 func TestResolveBrowserConfiguredWins(t *testing.T) {
-	b, err := resolveBrowser("chromium --incognito", "firefox", "firefox.desktop", fakeLookPath("chromium", "firefox"))
+	b, err := resolveBrowser(
+		"chromium --incognito",
+		"firefox",
+		"firefox.desktop",
+		fakeLookPath("chromium", "firefox"),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

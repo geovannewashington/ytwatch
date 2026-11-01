@@ -39,6 +39,7 @@ func parseTree(data []byte) (map[string]Window, error) {
 	if err := json.Unmarshal(data, &root); err != nil {
 		return nil, err
 	}
+
 	windows := make(map[string]Window)
 	var walk func(n node)
 	walk = func(n node) {
@@ -47,17 +48,21 @@ func parseTree(data []byte) (map[string]Window, error) {
 			if app == "" {
 				app = n.WindowProperties.Class
 			}
+
 			id := strconv.FormatInt(n.ID, 10)
 			windows[id] = Window{ID: id, Title: n.Name, App: app}
 		}
+
 		for _, child := range n.Nodes {
 			walk(child)
 		}
+
 		for _, child := range n.FloatingNodes {
 			walk(child)
 		}
 	}
 	walk(root)
+
 	return windows, nil
 }
 

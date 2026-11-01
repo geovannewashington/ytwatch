@@ -29,6 +29,7 @@ func userCacheDir() string {
 	if err != nil {
 		return os.TempDir()
 	}
+
 	return filepath.Join(home, ".cache")
 }
 
@@ -44,26 +45,32 @@ func prune(dir string, maxAge time.Duration, maxBytes int64, now time.Time) {
 	if err != nil {
 		return
 	}
+
 	type cached struct {
 		path string
 		size int64
 		when time.Time
 	}
+
 	var kept []cached
 	var total int64
+
 	for _, entry := range entries {
 		info, err := entry.Info()
 		if err != nil || !info.Mode().IsRegular() {
 			continue
 		}
+
 		path := filepath.Join(dir, entry.Name())
 		if now.Sub(info.ModTime()) > maxAge {
 			_ = os.Remove(path)
 			continue
 		}
+
 		kept = append(kept, cached{path, info.Size(), info.ModTime()})
 		total += info.Size()
 	}
+
 	sort.Slice(kept, func(i, j int) bool { return kept[i].when.Before(kept[j].when) })
 	for _, f := range kept {
 		if total <= maxBytes {
@@ -81,11 +88,16 @@ func validFileID(id string) bool {
 	if len(id) < 6 || len(id) > 64 {
 		return false
 	}
+
 	for _, r := range id {
-		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-') {
+		if !((r >= 'a' && r <= 'z') ||
+			(r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') ||
+			r == '_' || r == '-') {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -116,6 +128,7 @@ func Download(ctx context.Context, v media.Video) (string, error) {
 	if !validFileID(v.ID) {
 		return "", errors.New("invalid video ID")
 	}
+
 	candidates := v.ThumbnailCandidates()
 	if len(candidates) == 0 {
 		return "", errors.New("no valid HTTPS thumbnail URL")
@@ -137,6 +150,7 @@ func Download(ctx context.Context, v media.Video) (string, error) {
 		}
 		stale = destination
 	}
+
 	var data []byte
 	for _, candidate := range candidates {
 		image, err := fetchImage(ctx, candidate)
@@ -152,18 +166,21 @@ func Download(ctx context.Context, v media.Video) (string, error) {
 		data = image
 		break
 	}
+
 	if data == nil {
 		if stale != "" {
 			return stale, nil
 		}
 		return "", errors.New("no usable thumbnail")
 	}
+
 	// The file name is unique: a prefetch and a normal load of the same
 	// thumbnail can run at the same time, and must not write the same file.
 	file, err := os.CreateTemp(cacheDir, v.ID+"-*.tmp")
 	if err != nil {
 		return "", err
 	}
+
 	temp := file.Name()
 	_, writeErr := file.Write(data)
 	if closeErr := file.Close(); writeErr == nil {
@@ -173,10 +190,12 @@ func Download(ctx context.Context, v media.Video) (string, error) {
 		_ = os.Remove(temp)
 		return "", writeErr
 	}
+
 	if err := os.Rename(temp, destination); err != nil {
 		_ = os.Remove(temp)
 		return "", err
 	}
+
 	return destination, nil
 }
 
@@ -188,12 +207,14 @@ func fetchImage(ctx context.Context, thumbURL string) ([]byte, error) {
 		return nil, err
 	}
 	request.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) ytwatch/1.0")
+
 	client := &http.Client{Timeout: 5 * time.Second}
 	response, err := client.Do(request)
 	if err != nil {
 		return nil, err
 	}
 	defer response.Body.Close()
+
 	switch response.StatusCode {
 	case http.StatusOK:
 	case http.StatusNotFound, http.StatusForbidden, http.StatusGone:
@@ -201,16 +222,19 @@ func fetchImage(ctx context.Context, thumbURL string) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("thumbnail server returned %s", response.Status)
 	}
+
 	data, err := io.ReadAll(io.LimitReader(response.Body, 5*1024*1024+1))
 	if err != nil {
 		return nil, err
 	}
+
 	if len(data) == 0 || len(data) > 5*1024*1024 {
 		return nil, errUnusable
 	}
 	if http.DetectContentType(data) == "image/webp" {
 		return nil, errUnusable
 	}
+
 	return data, nil
 }
 
@@ -272,27 +296,33 @@ func (o *Overlay) startLocked() bool {
 			return true
 		}
 	}
+
 	path, err := exec.LookPath("ueberzugpp")
 	if err != nil {
 		return false
 	}
+
 	args := []string{"layer"}
 	if o.output != "" {
 		args = append(args, "--output", o.output)
 	}
+
 	cmd := exec.Command(path, args...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return false
 	}
+
 	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
 	if err := cmd.Start(); err != nil {
 		_ = stdin.Close()
 		return false
 	}
+
 	done := make(chan error, 1)
 	o.cmd, o.stdin, o.done, o.active = cmd, stdin, done, true
 	go func() { done <- cmd.Wait() }()
+
 	return true
 }
 
@@ -307,6 +337,7 @@ func (o *Overlay) sendLocked(payload map[string]any) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -315,6 +346,7 @@ func (o *Overlay) writeLocked(payload map[string]any) bool {
 	if err != nil {
 		return false
 	}
+
 	encoded = append(encoded, '\n')
 	if _, err := o.stdin.Write(encoded); err != nil {
 		if o.stdin != nil {
@@ -323,10 +355,13 @@ func (o *Overlay) writeLocked(payload map[string]any) bool {
 		if o.cmd != nil && o.cmd.Process != nil {
 			_ = o.cmd.Process.Kill()
 		}
+
 		o.active, o.visible = false, false
 		o.cmd, o.stdin, o.done = nil, nil, nil
+
 		return false
 	}
+
 	return true
 }
 
@@ -337,11 +372,14 @@ func (o *Overlay) Show(path string, x, y, width, height int) bool {
 		o.Remove()
 		return false
 	}
+
 	o.mu.Lock()
 	defer o.mu.Unlock()
+
 	if !o.startLocked() {
 		return false
 	}
+
 	o.pending = &placement{path, x, y, width, height}
 	if o.timer != nil {
 		return true // the timer will send the newest request
@@ -350,7 +388,9 @@ func (o *Overlay) Show(path string, x, y, width, height int) bool {
 		o.timer = time.AfterFunc(wait, o.flush)
 		return true
 	}
+
 	o.flushLocked()
+
 	return true
 }
 
@@ -367,6 +407,7 @@ func (o *Overlay) flushLocked() {
 	if p == nil || (o.visible && o.shown == *p) {
 		return
 	}
+
 	o.lastAdd = time.Now()
 	// Adding the same identifier replaces the image without a remove.
 	o.visible = o.sendLocked(map[string]any{
@@ -390,22 +431,27 @@ func (o *Overlay) Invalidate() {
 func (o *Overlay) Remove() {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+
 	o.pending = nil
 	if o.timer != nil {
 		o.timer.Stop()
 		o.timer = nil
 	}
+
 	if !o.active || o.stdin == nil || !o.visible {
 		return
 	}
+
 	o.visible = false
 	_ = o.writeLocked(map[string]any{"action": "remove", "identifier": "ytwatch-preview"})
 }
 
 func (o *Overlay) Close() {
 	o.Remove()
+
 	o.mu.Lock()
 	defer o.mu.Unlock()
+
 	if o.stdin != nil {
 		_ = o.stdin.Close()
 	}
@@ -417,17 +463,20 @@ func (o *Overlay) Close() {
 			_ = o.cmd.Process.Kill()
 		}
 	}
+
 	o.active, o.visible = false, false
 }
 
 func DescriptionSnippet(value string, maxRunes int) string {
 	value = strings.Join(strings.Fields(value), " ")
 	runes := []rune(value)
+
 	if len(runes) <= maxRunes {
 		return value
 	}
 	if maxRunes < 2 {
 		return string(runes[:maxRunes])
 	}
+
 	return string(runes[:maxRunes-1]) + "…"
 }

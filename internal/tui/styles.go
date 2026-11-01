@@ -88,6 +88,7 @@ func equalizer(frame, n int) string {
 	for i := 0; i < n; i++ {
 		b.WriteString(eqFrames[(frame+i*2)%len(eqFrames)])
 	}
+
 	return playingStyle.Render(b.String())
 }
 

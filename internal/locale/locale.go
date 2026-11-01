@@ -31,6 +31,7 @@ func NormalizeLanguage(value string) (string, error) {
 	if value == "" {
 		return "", nil
 	}
+
 	if i := strings.IndexByte(value, '-'); i > 0 {
 		suffix := strings.ToLower(value[i+1:])
 		if len(suffix) == 2 {
@@ -42,9 +43,11 @@ func NormalizeLanguage(value string) (string, error) {
 	} else {
 		value = strings.ToLower(value)
 	}
+
 	if !languagePattern.MatchString(value) {
 		return "", fmt.Errorf("invalid language %q (use a code such as pt, ja or pt-BR)", value)
 	}
+
 	return value, nil
 }
 
@@ -55,9 +58,11 @@ func NormalizeRegion(value string) (string, error) {
 	if value == "" {
 		return "", nil
 	}
+
 	if !regionPattern.MatchString(value) {
 		return "", fmt.Errorf("invalid region %q (use a two-letter country code such as BR or JP)", value)
 	}
+
 	return value, nil
 }
 
@@ -73,13 +78,16 @@ func (l Locale) YtDlpArgs(youtubeArgs ...string) []string {
 		parts = append(parts, "lang="+l.Language)
 	}
 	parts = append(parts, youtubeArgs...)
+
 	var args []string
 	if len(parts) > 0 {
 		args = append(args, "--extractor-args", "youtube:"+strings.Join(parts, ";"))
 	}
+
 	if l.Region != "" {
 		args = append(args, "--xff", l.Region)
 	}
+
 	return args
 }
 
@@ -89,9 +97,11 @@ func (l Locale) PageParams() string {
 	if l.Language != "" {
 		parts = append(parts, "hl="+l.Language)
 	}
+
 	if l.Region != "" {
 		parts = append(parts, "gl="+l.Region)
 	}
+
 	return strings.Join(parts, "&")
 }
 

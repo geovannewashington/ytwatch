@@ -92,7 +92,13 @@ func TestSearchAddsShortsToAMixedSearch(t *testing.T) {
 			if i > 0 {
 				b.WriteString(",")
 			}
-			fmt.Fprintf(&b, `{"shortsLockupViewModel":{"entityId":"shorts-shelf-item-short%06d","indexInCollection":%d,"overlayMetadata":{"primaryText":{"content":%q}}}}`, i, i, title)
+			fmt.Fprintf(
+				&b,
+				`{"shortsLockupViewModel":{"entityId":"shorts-shelf-item-short%06d","indexInCollection":%d,"overlayMetadata":{"primaryText":{"content":%q}}}}`,
+				i,
+				i,
+				title,
+			)
 		}
 		b.WriteString(`]};</script>`)
 		return []byte(b.String()), nil

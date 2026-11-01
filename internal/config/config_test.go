@@ -130,7 +130,8 @@ command = ["mpv", "--no-video", "%l"]
 	if len(cfg.Links) != 2 || cfg.Links[0].Name != "images" || cfg.Links[1].Name != "music" {
 		t.Fatalf("links = %+v", cfg.Links)
 	}
-	if !cfg.Links[0].Match.MatchString("https://x.com/a.jpg?w=1") || cfg.Links[0].Match.MatchString("https://x.com/a.html") {
+	if !cfg.Links[0].Match.MatchString("https://x.com/a.jpg?w=1") ||
+		cfg.Links[0].Match.MatchString("https://x.com/a.html") {
 		t.Fatal("images pattern does not match as expected")
 	}
 	if !cfg.Links[1].Match.MatchString("https://open.spotify.com/track/1") {

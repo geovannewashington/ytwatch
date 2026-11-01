@@ -180,6 +180,7 @@ func Path() string {
 		}
 		dir = filepath.Join(home, ".config")
 	}
+
 	return filepath.Join(dir, "ytwatch", "config.toml")
 }
 
@@ -190,6 +191,7 @@ func Load() (Config, error) {
 	if path == "" {
 		return Default(), nil
 	}
+
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return Default(), nil
@@ -197,10 +199,12 @@ func Load() (Config, error) {
 	if err != nil {
 		return Default(), err
 	}
+
 	cfg, err := Parse(string(data))
 	if err != nil {
 		return Default(), fmt.Errorf("%s: %w", path, err)
 	}
+
 	return cfg, nil
 }
 
@@ -208,27 +212,33 @@ func Parse(text string) (Config, error) {
 	cfg := Default()
 	section := ""
 	scanner := bufio.NewScanner(strings.NewReader(text))
+
 	for lineNo := 1; scanner.Scan(); lineNo++ {
 		line := strings.TrimSpace(stripComment(scanner.Text()))
 		if line == "" {
 			continue
 		}
+
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
 			section = strings.TrimSpace(line[1 : len(line)-1])
 			continue
 		}
+
 		key, raw, ok := strings.Cut(line, "=")
 		if !ok {
 			return cfg, fmt.Errorf("line %d: expected key = value", lineNo)
 		}
+
 		key, raw = strings.TrimSpace(key), strings.TrimSpace(raw)
 		if err := cfg.set(section, key, raw); err != nil {
 			return cfg, fmt.Errorf("line %d: %w", lineNo, err)
 		}
 	}
+
 	if err := scanner.Err(); err != nil {
 		return cfg, err
 	}
+
 	return cfg, cfg.checkLinks()
 }
 
@@ -239,7 +249,9 @@ func (c *Config) set(section, key, raw string) error {
 	if name, ok := strings.CutPrefix(section, "link."); ok {
 		return c.setLink(name, key, raw)
 	}
+
 	var err error
+
 	switch section + "." + key {
 	case "preview.output":
 		var value string
@@ -247,10 +259,15 @@ func (c *Config) set(section, key, raw string) error {
 		if err == nil {
 			value = strings.ToLower(value)
 			if value != "auto" && value != "off" && !slices.Contains(PreviewOutputs, value) {
-				return fmt.Errorf("invalid preview output %q (auto, off, %s)", value, strings.Join(PreviewOutputs, ", "))
+				return fmt.Errorf(
+					"invalid preview output %q (auto, off, %s)",
+					value,
+					strings.Join(PreviewOutputs, ", "),
+				)
 			}
 			c.Preview.Output = value
 		}
+
 	case "general.browser":
 		c.General.Browser, err = parseString(raw)
 	case "general.audio_only":
@@ -265,37 +282,44 @@ func (c *Config) set(section, key, raw string) error {
 			}
 			c.General.Quality = value
 		}
+
 	case "download.dir":
 		c.Download.Dir, err = parseString(raw)
 	case "download.args":
 		c.Download.Args, err = parseStringArray(raw)
+
 	case "mpv.workspace":
 		c.MPV.Workspace, err = parseString(raw)
 	case "mpv.cookies_from_browser":
 		c.MPV.CookiesFromBrowser, err = parseString(raw)
 	case "mpv.args":
 		c.MPV.Args, err = parseStringArray(raw)
+
 	case "search.language":
 		var value string
 		if value, err = parseString(raw); err == nil {
 			c.Search.Language, err = locale.NormalizeLanguage(value)
 		}
+
 	case "search.hide":
 		var names []string
 		if names, err = parseStringArray(raw); err == nil {
 			c.Search.Hide, err = parseKinds(names)
 		}
+
 	case "search.region":
 		var value string
 		if value, err = parseString(raw); err == nil {
 			c.Search.Region, err = locale.NormalizeRegion(value)
 		}
+
 	case "history.enabled":
 		c.History.Enabled, err = strconv.ParseBool(raw)
 	case "history.max_age_days":
 		c.History.MaxAgeDays, err = parseBoundedInt(raw, 36500) // about 100 years
 	case "history.max_entries":
 		c.History.MaxEntries, err = parseBoundedInt(raw, 100000)
+
 	case "ui.animations":
 		var value string
 		if value, err = parseString(raw); err == nil {
@@ -306,22 +330,27 @@ func (c *Config) set(section, key, raw string) error {
 				err = fmt.Errorf("%q is not one of full, minimal, off", value)
 			}
 		}
+
 	case "cache.max_age_days":
 		c.Cache.MaxAgeDays, err = parseBoundedInt(raw, 36500)
 	case "cache.max_size_mb":
 		c.Cache.MaxSizeMB, err = parseBoundedInt(raw, 100000)
+
 	case "chat.enabled":
 		c.Chat.Enabled, err = strconv.ParseBool(raw)
 	case "chat.workspace":
 		c.Chat.Workspace, err = parseString(raw)
 	case "chat.browser":
 		c.Chat.Browser, err = parseString(raw)
+
 	default:
 		return fmt.Errorf("unknown setting %q in section [%s]", key, section)
 	}
+
 	if err != nil {
 		return fmt.Errorf("invalid value for %s: %w", key, err)
 	}
+
 	return nil
 }
 
@@ -330,6 +359,7 @@ func (c *Config) setTheme(key, raw string) error {
 	if err != nil {
 		return fmt.Errorf("invalid value for %s: %w", key, err)
 	}
+
 	if key == "name" {
 		if _, ok := theme.Lookup(value); !ok {
 			return theme.UnknownThemeError(value)
@@ -337,16 +367,23 @@ func (c *Config) setTheme(key, raw string) error {
 		c.Theme.Name = strings.ToLower(strings.TrimSpace(value))
 		return nil
 	}
+
 	if !slices.Contains(theme.Roles, key) {
-		return fmt.Errorf("unknown setting %q in section [theme] (name, or a colour: %s)", key, strings.Join(theme.Roles, ", "))
+		return fmt.Errorf(
+			"unknown setting %q in section [theme] (name, or a colour: %s)",
+			key,
+			strings.Join(theme.Roles, ", "),
+		)
 	}
 	if !theme.ValidColor(value) {
 		return theme.InvalidColorError(value)
 	}
+
 	if c.Theme.Colors == nil {
 		c.Theme.Colors = make(map[string]string)
 	}
 	c.Theme.Colors[key] = value
+
 	return nil
 }
 
@@ -354,34 +391,41 @@ func (c *Config) setLink(name, key, raw string) error {
 	if name == "" {
 		return fmt.Errorf("a link section needs a name, like [link.images]")
 	}
+
 	i := slices.IndexFunc(c.Links, func(h LinkHandler) bool { return h.Name == name })
 	if i < 0 {
 		c.Links = append(c.Links, LinkHandler{Name: name})
 		i = len(c.Links) - 1
 	}
+
 	switch key {
 	case "match":
 		value, err := parseString(raw)
 		if err != nil {
 			return fmt.Errorf("invalid value for %s: %w", key, err)
 		}
+
 		re, err := regexp.Compile(value)
 		if err != nil {
 			return fmt.Errorf("invalid pattern for [link.%s]: %w", name, err)
 		}
 		c.Links[i].Match = re
+
 	case "command":
 		value, err := parseStringArray(raw)
 		if err != nil {
 			return fmt.Errorf("invalid value for %s: %w", key, err)
 		}
+
 		if len(value) == 0 || value[0] == "" {
 			return fmt.Errorf("command of [link.%s] is empty", name)
 		}
 		c.Links[i].Command = value
+
 	default:
 		return fmt.Errorf("unknown setting %q in section [link.%s] (match, command)", key, name)
 	}
+
 	return nil
 }
 
@@ -413,6 +457,7 @@ func parseString(raw string) (string, error) {
 // parseKinds turns the names in [search] hide into kinds, without repeats.
 func parseKinds(names []string) ([]media.Kind, error) {
 	var kinds []media.Kind
+
 	for _, name := range names {
 		kind, ok := media.ParseKind(name)
 		if !ok {
@@ -422,6 +467,7 @@ func parseKinds(names []string) ([]media.Kind, error) {
 			kinds = append(kinds, kind)
 		}
 	}
+
 	return kinds, nil
 }
 
@@ -430,11 +476,14 @@ func parseStringArray(raw string) ([]string, error) {
 		return nil, fmt.Errorf("expected an array like [\"a\", \"b\"]")
 	}
 	inner := strings.TrimSpace(raw[1 : len(raw)-1])
+
 	var out []string
+
 	for inner != "" {
 		if inner[0] != '"' {
 			return nil, fmt.Errorf("array items must be quoted strings")
 		}
+
 		end := 1
 		for end < len(inner) && (inner[end] != '"' || inner[end-1] == '\\') {
 			end++
@@ -442,20 +491,24 @@ func parseStringArray(raw string) ([]string, error) {
 		if end >= len(inner) {
 			return nil, fmt.Errorf("unterminated string")
 		}
+
 		item, err := strconv.Unquote(inner[:end+1])
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, item)
+
 		inner = strings.TrimSpace(inner[end+1:])
 		inner = strings.TrimSpace(strings.TrimPrefix(inner, ","))
 	}
+
 	return out, nil
 }
 
 // stripComment removes a trailing # comment that is not inside a string.
 func stripComment(line string) string {
 	var quote byte // the quote that opened the current string, or 0
+
 	for i := 0; i < len(line); i++ {
 		c := line[i]
 		switch {
@@ -472,6 +525,7 @@ func stripComment(line string) string {
 			return line[:i]
 		}
 	}
+
 	return line
 }
 
