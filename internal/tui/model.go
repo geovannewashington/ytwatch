@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -50,6 +51,20 @@ type searchEventMsg struct {
 }
 
 type searchClosedMsg struct{ generation int }
+
+// prefetchDelayMsg fires when a row has stayed selected for a moment; the
+// thumbnails of its neighbors are then downloaded ahead of time.
+type prefetchDelayMsg struct {
+	id  string
+	seq int
+}
+
+// prefetchedMsg is the result of one background thumbnail download.
+type prefetchedMsg struct {
+	id   string
+	path string
+	err  error
+}
 
 type thumbnailDelayMsg struct {
 	id       string
@@ -196,6 +211,14 @@ type Model struct {
 	settleSeq      int
 	thumbSequence  int
 	thumbCancel    context.CancelFunc
+
+	// Thumbnails of the rows around the selection are downloaded in the
+	// background, so moving to them finds the file in the cache.
+	send           func(tea.Msg) // sends a message to the program; set by Attach
+	prefetchCtx    context.Context
+	prefetchCancel context.CancelFunc
+	prefetchSeq    int
+	prefetchTried  map[string]bool // asked once: in flight, done or failed
 	thumbLoadingID string
 	thumbFailures  map[string]time.Time
 	thumbAttempts  map[string]int
@@ -287,6 +310,9 @@ func (m *Model) Close() {
 	if m.thumbCancel != nil {
 		m.thumbCancel()
 	}
+	if m.prefetchCancel != nil {
+		m.prefetchCancel()
+	}
 	if m.overlay != nil {
 		m.overlay.Close()
 	}
@@ -333,6 +359,11 @@ func (m *Model) startStream(status string, run func(ctx context.Context, emit fu
 	}
 	m.thumbLoadingID = ""
 	m.overlay.Remove()
+	if m.prefetchCancel != nil {
+		m.prefetchCancel() // the old results are gone
+		m.prefetchCtx, m.prefetchCancel = nil, nil
+		m.prefetchTried = nil
+	}
 
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.searchCancel = cancel
@@ -535,6 +566,28 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.thumbCancel = cancel
 		m.thumbLoadingID = msg.id
 		return m, loadThumbnail(ctx, v, msg.sequence)
+
+	case prefetchDelayMsg:
+		if msg.seq != m.prefetchSeq || m.selectedID() != msg.id {
+			return m, nil
+		}
+		if m.thumbLoadingID != "" {
+			// The selected thumbnail comes first; ask again shortly.
+			return m, tea.Tick(prefetchDelay, func(time.Time) tea.Msg { return msg })
+		}
+		return m, m.prefetchNeighbors()
+
+	case prefetchedMsg:
+		switch {
+		case msg.err == nil && msg.path != "":
+			m.thumbnailPaths[msg.id] = msg.path
+			if m.selectedID() == msg.id {
+				m.showSelectedThumbnail()
+			}
+		case errors.Is(msg.err, context.Canceled):
+			delete(m.prefetchTried, msg.id) // not a failure: ask again later
+		}
+		return m, nil
 
 	case detailsDelayMsg:
 		if msg.generation != m.generation || m.selectedID() != msg.id {
@@ -1272,6 +1325,13 @@ const detailsDelay = 400 * time.Millisecond
 // schedules the thumbnail and, for a row without details, its detail lookup.
 func (m *Model) scheduleThumbnail() tea.Cmd {
 	cmds := []tea.Cmd{m.scheduleThumbnailLoad()}
+	if v, ok := m.selectedVideo(); ok {
+		m.prefetchSeq++
+		id, seq := v.ID, m.prefetchSeq
+		cmds = append(cmds, tea.Tick(prefetchDelay, func(time.Time) tea.Msg {
+			return prefetchDelayMsg{id: id, seq: seq}
+		}))
+	}
 	if v, ok := m.selectedVideo(); ok && !v.Detailed {
 		id, generation := v.ID, m.generation
 		cmds = append(cmds, tea.Tick(detailsDelay, func(time.Time) tea.Msg {
@@ -1405,6 +1465,95 @@ func (m *Model) thumbRows() int {
 	return max(0, min(8, m.bodyHeight()-10))
 }
 
+const (
+	prefetchDelay   = 300 * time.Millisecond // the selection must rest this long
+	prefetchAhead   = 5                      // rows after the selection
+	prefetchBehind  = 2                      // rows before it
+	prefetchWorkers = 2                      // downloads at the same time
+)
+
+// prefetchTargets lists the videos around the selection whose thumbnail is
+// not in memory and was not asked for yet, nearest first, rows below first.
+func (m *Model) prefetchTargets() []media.Video {
+	var targets []media.Video
+	add := func(offset int) {
+		index := m.selected + offset
+		if index < 0 || index >= len(m.items) {
+			return
+		}
+		v := m.items[index]
+		if m.thumbnailPaths[v.ID] != "" || m.prefetchTried[v.ID] {
+			return
+		}
+		if _, failed := m.thumbFailures[v.ID]; failed {
+			return
+		}
+		targets = append(targets, v)
+	}
+	for offset := 1; offset <= prefetchAhead; offset++ {
+		add(offset)
+		if offset <= prefetchBehind {
+			add(-offset)
+		}
+	}
+	return targets
+}
+
+// prefetchNeighbors starts downloading the thumbnails that prefetchTargets
+// lists. The downloads end with the search that made them or with the program.
+func (m *Model) prefetchNeighbors() tea.Cmd {
+	if m.send == nil || !m.thumbnailsOn() || m.width < wideWidth {
+		return nil
+	}
+	targets := m.prefetchTargets()
+	if len(targets) == 0 {
+		return nil
+	}
+	if m.prefetchCtx == nil {
+		m.prefetchCtx, m.prefetchCancel = context.WithCancel(m.ctx)
+	}
+	if m.prefetchTried == nil {
+		m.prefetchTried = map[string]bool{}
+	}
+	for _, v := range targets {
+		m.prefetchTried[v.ID] = true
+	}
+	return prefetchThumbnails(m.prefetchCtx, targets, m.send)
+}
+
+// prefetchThumbnails downloads the thumbnails in order with a few workers and
+// sends one prefetchedMsg for each. The workers only use their own copies of
+// the videos; the model is changed only when the messages arrive.
+func prefetchThumbnails(ctx context.Context, videos []media.Video, send func(tea.Msg)) tea.Cmd {
+	return func() tea.Msg {
+		jobs := make(chan media.Video)
+		var workers sync.WaitGroup
+		for range prefetchWorkers {
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				for v := range jobs {
+					download, cancel := context.WithTimeout(ctx, 8*time.Second)
+					path, err := preview.Download(download, v)
+					cancel()
+					send(prefetchedMsg{id: v.ID, path: path, err: err})
+				}
+			}()
+		}
+	feed:
+		for _, v := range videos {
+			select {
+			case jobs <- v:
+			case <-ctx.Done():
+				break feed
+			}
+		}
+		close(jobs)
+		workers.Wait()
+		return nil
+	}
+}
+
 func loadThumbnail(ctx context.Context, v media.Video, sequence int) tea.Cmd {
 	return func() tea.Msg {
 		path, err := preview.Download(ctx, v)
@@ -1438,6 +1587,7 @@ func (m *Model) redrawThumbnail() {
 // Attach connects the model to the running program, so background work can
 // send it messages. Call it after tea.NewProgram.
 func (m *Model) Attach(send func(tea.Msg)) {
+	m.send = send
 	player.OnWindowPlaced = func() { send(windowPlacedMsg{}) }
 }
 

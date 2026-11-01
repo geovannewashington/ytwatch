@@ -133,9 +133,20 @@ func Download(ctx context.Context, v media.Video) (string, error) {
 	if data == nil {
 		return "", errors.New("no usable thumbnail")
 	}
-	temp := destination + ".tmp-" + fmt.Sprint(os.Getpid())
-	if err := os.WriteFile(temp, data, 0o600); err != nil {
+	// The file name is unique: a prefetch and a normal load of the same
+	// thumbnail can run at the same time, and must not write the same file.
+	file, err := os.CreateTemp(cacheDir, v.ID+"-*.tmp")
+	if err != nil {
 		return "", err
+	}
+	temp := file.Name()
+	_, writeErr := file.Write(data)
+	if closeErr := file.Close(); writeErr == nil {
+		writeErr = closeErr
+	}
+	if writeErr != nil {
+		_ = os.Remove(temp)
+		return "", writeErr
 	}
 	if err := os.Rename(temp, destination); err != nil {
 		_ = os.Remove(temp)

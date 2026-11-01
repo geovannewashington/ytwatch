@@ -1046,3 +1046,43 @@ func TestBlurIsIgnoredOutsideTmux(t *testing.T) {
 		t.Error("outside tmux the image stays when the terminal loses focus")
 	}
 }
+
+func prefetchModel(n, selected int) *Model {
+	m := New("")
+	for i := 0; i < n; i++ {
+		m.items = append(m.items, media.Video{ID: fmt.Sprintf("vid%05d", i)})
+	}
+	m.selected = selected
+	return m
+}
+
+func targetIDs(m *Model) []string {
+	var ids []string
+	for _, v := range m.prefetchTargets() {
+		ids = append(ids, v.ID)
+	}
+	return ids
+}
+
+func TestPrefetchTargetsAreTheNeighborsNearestFirst(t *testing.T) {
+	m := prefetchModel(20, 10)
+	got := strings.Join(targetIDs(m), " ")
+	want := "vid00011 vid00009 vid00012 vid00008 vid00013 vid00014 vid00015"
+	if got != want {
+		t.Errorf("targets = %s\nwant      %s", got, want)
+	}
+}
+
+func TestPrefetchTargetsStayInsideTheListAndSkipKnownRows(t *testing.T) {
+	m := prefetchModel(4, 0)
+	m.thumbnailPaths["vid00001"] = "/cache/a.jpg"       // already in memory
+	m.prefetchTried = map[string]bool{"vid00002": true} // already asked for
+	m.thumbFailures["vid00003"] = time.Now()            // failed recently
+	if got := targetIDs(m); len(got) != 0 {
+		t.Errorf("nothing is left to prefetch, got %v", got)
+	}
+	m = prefetchModel(3, 2)
+	if got := strings.Join(targetIDs(m), " "); got != "vid00001 vid00000" {
+		t.Errorf("at the end of the list, got %s", got)
+	}
+}
