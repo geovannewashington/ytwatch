@@ -54,9 +54,58 @@ func systemProbe() probe {
 	}
 }
 
+// doctorResult is what the checks found.
+type doctorResult struct {
+	missing []string // names of the required programs that were not found
+	wayland bool     // the session is Wayland, which decides the clipboard tool
+}
+
 // runDoctor prints what ytwatch finds on this system and returns the exit
-// code: 1 when a required program is missing.
+// code: 1 when a required program is missing. It then says how to install
+// what is missing.
 func runDoctor(w io.Writer, cfg config.Config, p probe) int {
+	result := diagnose(w, cfg, p)
+
+	if len(result.missing) == 0 {
+		fmt.Fprintln(w, "\nAll required programs found.")
+
+		return 0
+	}
+
+	noun := "programs"
+	if len(result.missing) == 1 {
+		noun = "program"
+	}
+
+	fmt.Fprintf(w, "\n%d required %s missing.\n", len(result.missing), noun)
+
+	plan := planInstall(result.missing, result.wayland, p.lookPath)
+	if plan.command != "" {
+		fmt.Fprintf(w, "\nInstall what is missing with:\n  %s\n", plan.command)
+	}
+
+	if len(plan.notes) > 0 {
+		fmt.Fprintln(w)
+
+		for _, note := range plan.notes {
+			fmt.Fprintf(w, "  %s\n", note)
+		}
+	}
+
+	return 1
+}
+
+// installCommand is the command that installs the missing programs, or "" when
+// nothing is missing or no single command covers it. install.sh uses it.
+func installCommand(cfg config.Config, p probe) string {
+	result := diagnose(io.Discard, cfg, p)
+
+	return planInstall(result.missing, result.wayland, p.lookPath).command
+}
+
+// diagnose checks the session and the required programs, and prints what it
+// finds to w.
+func diagnose(w io.Writer, cfg config.Config, p probe) doctorResult {
 	fmt.Fprintln(w, "ytwatch doctor")
 
 	fmt.Fprintln(w, "\nSession")
@@ -110,7 +159,7 @@ func runDoctor(w io.Writer, cfg config.Config, p probe) int {
 	// Everything here is required: without ffmpeg a video download is saved as
 	// two files that are not merged, and without ueberzugpp there are no
 	// thumbnails.
-	missing := 0
+	var missing []string
 	fmt.Fprintln(w, "\nRequired")
 
 	for _, dep := range []struct{ name, flag, hint string }{
@@ -126,7 +175,7 @@ func runDoctor(w io.Writer, cfg config.Config, p probe) int {
 	} {
 		if _, err := p.lookPath(dep.name); err != nil {
 			row(w, "missing", dep.name, dep.hint)
-			missing++
+			missing = append(missing, dep.name)
 
 			continue
 		}
@@ -145,21 +194,21 @@ func runDoctor(w io.Writer, cfg config.Config, p probe) int {
 			"ueberzugpp",
 			"thumbnails · Arch: pacman -S ueberzugpp · Homebrew: brew install jstkdng/programs/ueberzugpp · other: github.com/jstkdng/ueberzugpp",
 		)
-		missing++
+		missing = append(missing, "ueberzugpp")
 	}
 
 	if name := p.browser(cfg); name != "" {
 		row(w, "ok", "browser", name+" (o opens links, live chat)")
 	} else {
 		row(w, "missing", "browser", "none found · install one, or set [general] browser in config.toml")
-		missing++
+		missing = append(missing, "browser")
 	}
 
 	if tool, err := p.clipboard(); err == nil {
 		row(w, "ok", "clipboard", tool+" (y copies a link)")
 	} else {
 		row(w, "missing", "clipboard", "install wl-clipboard (Wayland) or xclip / xsel (X11) for y")
-		missing++
+		missing = append(missing, "clipboard")
 	}
 
 	// i3 has its own way to move windows; other X11 window managers use wmctrl.
@@ -168,24 +217,11 @@ func runDoctor(w io.Writer, cfg config.Config, p probe) int {
 			row(w, "ok", "wmctrl", "workspace placement on X11")
 		} else {
 			row(w, "missing", "wmctrl", "workspace placement on X11 · install wmctrl with your package manager")
-			missing++
+			missing = append(missing, "wmctrl")
 		}
 	}
 
-	if missing > 0 {
-		noun := "programs"
-		if missing == 1 {
-			noun = "program"
-		}
-
-		fmt.Fprintf(w, "\n%d required %s missing.\n", missing, noun)
-
-		return 1
-	}
-
-	fmt.Fprintln(w, "\nAll required programs found.")
-
-	return 0
+	return doctorResult{missing: missing, wayland: server == "Wayland"}
 }
 
 func row(w io.Writer, status, name, detail string) {

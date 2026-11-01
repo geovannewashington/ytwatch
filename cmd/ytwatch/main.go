@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -14,26 +15,57 @@ import (
 	"github.com/geovannewashington/ytwatch/internal/tui"
 )
 
-const version = "0.1.0"
+// version is set when a release is built (-ldflags "-X main.version=..."). It
+// stays empty for "go install", which records the module version instead; see
+// versionString.
+var version string
+
+// versionString is the version to show, without a leading "v": the release
+// version, else the module version of "go install pkg@v0.1.0", else "dev" for
+// a build from a checkout.
+func versionString() string {
+	if version != "" {
+		return version
+	}
+
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if v := info.Main.Version; v != "" && v != "(devel)" {
+			return strings.TrimPrefix(v, "v")
+		}
+	}
+
+	return "dev"
+}
 
 func main() {
 	args := os.Args[1:]
 	if len(args) == 1 && (args[0] == "-h" || args[0] == "--help" || args[0] == "help") {
-		printHelp(version)
+		printHelp(versionString())
 		return
 	}
 
 	if len(args) == 1 && (args[0] == "-v" || args[0] == "--version") {
-		fmt.Printf("ytwatch %s\n", version)
+		fmt.Printf("ytwatch %s\n", versionString())
 		return
 	}
 
-	if len(args) == 1 && (args[0] == "doctor" || args[0] == "--doctor") {
+	installOnly := len(args) == 2 && args[1] == "--install-command"
+	if (len(args) == 1 || installOnly) && (args[0] == "doctor" || args[0] == "--doctor") {
 		cfg, err := config.Load()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "ytwatch: config error:", err)
 			cfg = config.Default()
 		}
+
+		// install.sh asks for just the command that installs what is missing.
+		if installOnly {
+			if command := installCommand(cfg, systemProbe()); command != "" {
+				fmt.Println(command)
+			}
+
+			return
+		}
+
 		os.Exit(runDoctor(os.Stdout, cfg, systemProbe()))
 	}
 
