@@ -1258,3 +1258,64 @@ func TestPreviewSaysDetailsAreLoadingUntilTheyArriveOrFail(t *testing.T) {
 		t.Errorf("the description should show once it is known:\n%s", out)
 	}
 }
+
+// Titles, channel names and descriptions come from the network. The tests run
+// with colors off, so any escape or bell byte in the screen came from them.
+func TestTextFromYouTubeCannotInjectTerminalCodes(t *testing.T) {
+	evil := "x\x1b]0;pwned\x07\x1b[2J\x1b[31m\u009b31m\x07y"
+
+	m := New(evil) // the query given on the command line
+	m.width, m.height = 140, 40
+	m.searchMode = false
+	m.searchDone, m.metadataDone = true, true
+
+	m.items = []media.Video{
+		{
+			ID: "vid00000001", Title: evil, Channel: evil, Detailed: true,
+			Description: evil + "\n" + evil, Duration: 60, ViewCount: 5,
+		},
+		{
+			ID: "PL12345678", Title: evil, Channel: evil, WebpageURL: "https://www.youtube.com/playlist?list=PL12345678",
+			Entries: []media.PlaylistEntry{{Title: evil}},
+		},
+	}
+	m.ranks = []int{0, 10}
+
+	for _, selected := range []int{0, 1} {
+		m.selected = selected
+
+		out := m.View()
+		if strings.ContainsAny(out, "\x1b\x07\u009b") {
+			t.Errorf("row %d: a terminal control code reached the screen: %q", selected, out)
+		}
+	}
+}
+
+// Text typed, pasted or read from the history file goes through the search line.
+func TestSearchLineCannotInjectTerminalCodes(t *testing.T) {
+	evil := "x\x1b]0;pwned\x07\x1b[2J\u009b31m\ny"
+
+	m := New("")
+	m.width, m.height = 140, 40
+
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(evil), Paste: true})
+	if strings.ContainsAny(m.searchInput, "\x1b\x07\u009b\n") {
+		t.Errorf("a pasted control code is in the search line: %q", m.searchInput)
+	}
+	if !strings.HasPrefix(m.searchInput, "x") || !strings.HasSuffix(m.searchInput, "y") {
+		t.Errorf("the text around the control codes should stay: %q", m.searchInput)
+	}
+
+	m.setInput(evil) // a line of the history file, or the current query
+	if strings.ContainsAny(m.searchInput, "\x1b\x07\u009b\n") {
+		t.Errorf("a control code from setInput is in the search line: %q", m.searchInput)
+	}
+
+	if out := m.View(); strings.ContainsAny(out, "\x1b\x07\u009b") {
+		t.Errorf("a terminal control code reached the screen: %q", out)
+	}
+
+	if got := stripControls("a\tb\nc"); got != "a b c" {
+		t.Errorf("tabs and line breaks become spaces, got %q", got)
+	}
+}

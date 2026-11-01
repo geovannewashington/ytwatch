@@ -260,7 +260,7 @@ func New(initialQuery string) *Model {
 		themeName:      theme.Default,
 		openURL:        player.OpenURL,
 		runCommand:     links.Run,
-		query:          strings.TrimSpace(initialQuery),
+		query:          strings.TrimSpace(stripControls(initialQuery)),
 		status:         "",
 		thumbnailPaths: make(map[string]string),
 		thumbLoadedAt:  make(map[string]time.Time),
@@ -983,7 +983,26 @@ func (m *Model) browseHistory(step int) {
 }
 
 // setInput replaces the text of the search line and puts the cursor at its end.
+// stripControls removes control characters (escape, bell, ...) from text that
+// is typed, pasted, or read from the command line or the history file. They
+// would reach the terminal as commands when the text is drawn: a pasted
+// escape sequence can set the window title or clear the screen. Line breaks
+// and tabs become spaces.
+func stripControls(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r == '\t' || r == '\n' || r == '\r':
+			return ' '
+		case r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0):
+			return -1
+		}
+
+		return r
+	}, s)
+}
+
 func (m *Model) setInput(text string) {
+	text = stripControls(text)
 	m.searchInput = text
 	m.searchCursor = len([]rune(text))
 }
@@ -995,6 +1014,7 @@ func (m *Model) handleSearchInput(msg tea.KeyMsg) tea.Cmd {
 	cursor := min(max(m.searchCursor, 0), len(runes))
 
 	edit := func(from, to int, insert string) {
+		insert = stripControls(insert)
 		out := append(append(append([]rune{}, runes[:from]...), []rune(insert)...), runes[to:]...)
 		m.searchInput = string(out)
 		m.searchCursor = from + len([]rune(insert))
