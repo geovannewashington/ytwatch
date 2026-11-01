@@ -395,6 +395,10 @@ func TestHiddenKindsAreLeftOutUnlessTheFilterAsksForThem(t *testing.T) {
 	if hiddenKinds(nil, Filters{}) != nil {
 		t.Error("nothing hidden should give no set")
 	}
+	videos := hiddenKinds(nil, Filters{Type: TypeVideos})
+	if !videos[media.KindLive] || !videos[media.KindUpcoming] || videos[media.KindPastLive] {
+		t.Errorf("the Videos filter leaves out streams on air or soon, but keeps recordings, got %v", videos)
+	}
 }
 
 func TestSearchDropsHiddenKindsAndSkipsTheirQueries(t *testing.T) {

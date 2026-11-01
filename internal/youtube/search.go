@@ -90,9 +90,10 @@ var (
 
 // hiddenKinds is the set of kinds a search leaves out: those in [search] hide,
 // except the kinds that the filter asks for, so a Shorts search still finds
-// Shorts when they are hidden.
+// Shorts when they are hidden. The Videos filter also leaves out streams: on
+// YouTube it includes the ones on air, but the Live filter is for those.
 func hiddenKinds(hide []media.Kind, f Filters) map[media.Kind]bool {
-	if len(hide) == 0 {
+	if len(hide) == 0 && f.Type != TypeVideos {
 		return nil
 	}
 	hidden := map[media.Kind]bool{}
@@ -100,6 +101,9 @@ func hiddenKinds(hide []media.Kind, f Filters) map[media.Kind]bool {
 		hidden[kind] = true
 	}
 	switch f.Type {
+	case TypeVideos:
+		hidden[media.KindLive] = true
+		hidden[media.KindUpcoming] = true
 	case TypeShorts:
 		delete(hidden, media.KindShort)
 	case TypeLive:
