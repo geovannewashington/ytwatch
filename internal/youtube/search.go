@@ -43,15 +43,6 @@ const (
 	// A filtered search is one query on the results page.
 	filteredResultCount   = ResultLimit
 	filteredPlaylistCount = ResultLimit
-
-	// Detail lookups are the main CPU cost of a search: every yt-dlp run
-	// starts Python and loads all extractors. So they are batched, run by few
-	// workers at a low priority, and done up front only for the first rows;
-	// the interface asks for the rest when a row is selected.
-	metadataWorkers = 2
-	detailBatchSize = 5
-	detailBatchWait = 150 * time.Millisecond
-	eagerVideos     = 20
 )
 
 type Event struct {
@@ -235,8 +226,9 @@ type queryResult struct {
 // Search runs a normal relevance search alongside a live-oriented search and a
 // playlist search. With filters it runs one query on the results page instead,
 // because only that page supports them. All of them stream flat results
-// immediately; richer metadata is resolved by a bounded worker pool so stream
-// status and Shorts details can update later.
+// immediately. The search itself does no detail lookups, which are the main
+// CPU cost; the interface asks for the details of the rows near the selection
+// with FetchDetailsBatch.
 func Search(
 	ctx context.Context,
 	query string,
@@ -256,10 +248,6 @@ func Search(
 
 	searchCtx, cancelSearch := context.WithTimeout(ctx, 25*time.Second)
 	defer cancelSearch()
-
-	regularJobs := make(chan media.Video, videoResultCount)
-	liveJobs := make(chan media.Video, liveResultCount)
-	workers := startDetailWorkers(ctx, regularJobs, liveJobs, loc, emit)
 
 	var seen sync.Map
 	var uniqueCount atomic.Int64
@@ -288,7 +276,6 @@ func Search(
 					func(position int, _ string) int { return mainRanking.at(position) },
 					&seen,
 					&uniqueCount,
-					regularJobs,
 					emit,
 				)
 			})
@@ -302,7 +289,6 @@ func Search(
 					mainRanking,
 					&seen,
 					&uniqueCount,
-					liveJobs,
 					emit,
 				)
 			})
@@ -319,8 +305,6 @@ func Search(
 					hidden,
 					&seen,
 					&uniqueCount,
-					regularJobs,
-					liveJobs,
 					emit,
 				)
 			})
@@ -338,8 +322,6 @@ func Search(
 				hidden,
 				&seen,
 				&uniqueCount,
-				regularJobs,
-				liveJobs,
 				emit,
 			)
 		})
@@ -359,8 +341,6 @@ func Search(
 					hidden,
 					&seen,
 					&uniqueCount,
-					regularJobs,
-					liveJobs,
 					emit,
 				)
 			})
@@ -376,7 +356,6 @@ func Search(
 					playlistRanking,
 					&seen,
 					&uniqueCount,
-					liveJobs,
 					emit,
 				)
 			})
@@ -394,7 +373,6 @@ func Search(
 					shortRanking(query),
 					&seen,
 					&uniqueCount,
-					regularJobs,
 					emit,
 				)
 			})
@@ -411,8 +389,6 @@ func Search(
 	}
 
 	searchWG.Wait()
-	close(regularJobs)
-	close(liveJobs)
 
 	results := make([]queryResult, len(queries))
 	for i := range results {
@@ -438,89 +414,9 @@ func Search(
 	}
 	emit(Event{Kind: EventSearchDone, Count: int(uniqueCount.Load()), Err: searchErr})
 
-	workers.Wait()
+	// The search does not look up details; the interface asks for those of the
+	// rows near the selection (see FetchDetailsBatch).
 	emit(Event{Kind: EventDetailsEnd, Count: int(uniqueCount.Load())})
-}
-
-// startDetailWorkers starts the bounded pool that looks up richer metadata for
-// results: stream status, Shorts, description and age. Jobs on live are served
-// first, and jobs are taken in batches that share one yt-dlp run. The pool ends
-// when both channels are closed and empty.
-func startDetailWorkers(
-	ctx context.Context,
-	regularJobs, liveJobs <-chan media.Video,
-	loc locale.Locale,
-	emit func(Event),
-) *sync.WaitGroup {
-	var workers sync.WaitGroup
-	for i := 0; i < metadataWorkers; i++ {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
-			regular, live := regularJobs, liveJobs
-			for {
-				batch := collectBatch(ctx, &regular, &live)
-				if len(batch) == 0 {
-					return
-				}
-				_ = FetchDetailsBatch(ctx, batch, loc, func(v media.Video) {
-					if ctx.Err() == nil {
-						emit(Event{Kind: EventDetails, Video: v})
-					}
-				})
-			}
-		}()
-	}
-	return &workers
-}
-
-// collectBatch waits for one job, then gathers more for a short time, up to
-// detailBatchSize. A channel that is closed is set to nil. It returns nothing
-// when there is no more work or ctx ends.
-func collectBatch(ctx context.Context, regular, live *<-chan media.Video) []media.Video {
-	var batch []media.Video
-	take := func(v media.Video, ok bool, from *<-chan media.Video) {
-		if !ok {
-			*from = nil
-			return
-		}
-		batch = append(batch, v)
-	}
-	// Prefer live-search candidates so their status is resolved early.
-	for len(batch) == 0 {
-		if *regular == nil && *live == nil {
-			return nil
-		}
-		select {
-		case v, ok := <-*live:
-			take(v, ok, live)
-			continue
-		default:
-		}
-		select {
-		case <-ctx.Done():
-			return nil
-		case v, ok := <-*live:
-			take(v, ok, live)
-		case v, ok := <-*regular:
-			take(v, ok, regular)
-		}
-	}
-	timer := time.NewTimer(detailBatchWait)
-	defer timer.Stop()
-	for len(batch) < detailBatchSize && (*regular != nil || *live != nil) {
-		select {
-		case <-ctx.Done():
-			return batch
-		case <-timer.C:
-			return batch
-		case v, ok := <-*live:
-			take(v, ok, live)
-		case v, ok := <-*regular:
-			take(v, ok, regular)
-		}
-	}
-	return batch
 }
 
 // runQuery runs one yt-dlp search and streams its results. source is a
@@ -532,13 +428,11 @@ func runQuery(
 	listEnd int,
 	loc locale.Locale,
 	order ranking,
-	prioritizeLive bool,
+	liveQuery bool,
 	channel *topChannel,
 	hidden map[media.Kind]bool,
 	seen *sync.Map,
 	uniqueCount *atomic.Int64,
-	regularJobs chan<- media.Video,
-	liveJobs chan<- media.Video,
 	emit func(Event),
 ) queryResult {
 	// A query that is done looking for the channel tells so, once; the
@@ -625,7 +519,7 @@ func runQuery(
 			rank := order.at(position)
 			if channel != nil && video.IsCurrentlyLive() {
 				id := channel.current()
-				if prioritizeLive {
+				if liveQuery {
 					checkedChannel() // do not wait for ourselves
 					id = channel.wait(ctx)
 				}
@@ -634,24 +528,6 @@ func runQuery(
 				}
 			}
 			emit(Event{Kind: EventResult, Video: video, Count: count, Rank: rank})
-			if prioritizeLive {
-				select {
-				case liveJobs <- video:
-				case <-ctx.Done():
-				}
-			} else if position < eagerVideos {
-				select {
-				case regularJobs <- video:
-				case <-ctx.Done():
-				}
-			}
-		} else if prioritizeLive {
-			// If the general query found this first, schedule another detail
-			// lookup from the live-oriented queue to prioritize live status.
-			select {
-			case liveJobs <- video:
-			case <-ctx.Done():
-			}
 		}
 	}
 
@@ -677,8 +553,8 @@ func playlistSearchURL(query string) string {
 	return resultsURL(query, Filters{Type: TypePlaylists})
 }
 
-// runPlaylistQuery emits playlist results and queues them for a detail lookup
-// on the priority queue, so their size and first videos show up early.
+// runPlaylistQuery emits playlist results. Their size and first videos come
+// later, from a detail lookup of the selected playlist.
 func runPlaylistQuery(
 	ctx context.Context,
 	source string,
@@ -687,7 +563,6 @@ func runPlaylistQuery(
 	order ranking,
 	seen *sync.Map,
 	uniqueCount *atomic.Int64,
-	jobs chan<- media.Video,
 	emit func(Event),
 ) queryResult {
 	args := []string{
@@ -735,11 +610,6 @@ func runPlaylistQuery(
 				Count: int(uniqueCount.Add(1)),
 				Rank:  order.at(position),
 			})
-
-			select {
-			case jobs <- playlist:
-			case <-ctx.Done():
-			}
 		}
 	}
 

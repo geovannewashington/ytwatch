@@ -1162,3 +1162,99 @@ func TestPlaylistListsAreNotCapped(t *testing.T) {
 		t.Errorf("a playlist keeps all its videos, got %d", len(m.items))
 	}
 }
+
+func detailModel(n, selected int) *Model {
+	m := prefetchModel(n, selected)
+	m.metadataDone = true
+
+	return m
+}
+
+func detailTargetIDs(m *Model) string {
+	var ids []string
+	for _, v := range m.detailTargets() {
+		ids = append(ids, v.ID)
+	}
+
+	return strings.Join(ids, " ")
+}
+
+func TestDetailTargetsAreTheSelectedRowThenItsNeighbors(t *testing.T) {
+	m := detailModel(20, 10)
+
+	want := "vid00010 vid00011 vid00009 vid00012 vid00008 vid00013 vid00014 vid00015"
+	if got := detailTargetIDs(m); got != want {
+		t.Errorf("targets = %s\nwant      %s", got, want)
+	}
+
+	m.items[10].Detailed = true
+	m.detailsAsked = map[string]bool{"vid00012": true}
+	m.items[13].Detailed = true
+
+	want = "vid00011 vid00009 vid00008 vid00014 vid00015"
+	if got := detailTargetIDs(m); got != want {
+		t.Errorf("rows with details or asked for are left out:\ngot  %s\nwant %s", got, want)
+	}
+}
+
+func TestDetailTargetsLookUpOnlyTheSelectedPlaylist(t *testing.T) {
+	m := detailModel(6, 2)
+	for _, i := range []int{1, 2, 3} {
+		m.items[i].WebpageURL = "https://www.youtube.com/playlist?list=PL12345678"
+	}
+
+	got := detailTargetIDs(m)
+	if !strings.Contains(got, "vid00002") {
+		t.Errorf("the selected playlist should be looked up, got %s", got)
+	}
+	if strings.Contains(got, "vid00001") || strings.Contains(got, "vid00003") {
+		t.Errorf("neighbor playlists cost a yt-dlp run each and must wait, got %s", got)
+	}
+}
+
+func TestNoDetailLookupBeforeTheSearchEndsOrWithoutAProgram(t *testing.T) {
+	m := detailModel(5, 0)
+	m.send = func(tea.Msg) {}
+
+	m.metadataDone = false
+	if m.lookUpDetails() != nil {
+		t.Error("lookups wait for the search to finish")
+	}
+
+	m.metadataDone = true
+	m.send = nil
+	if m.lookUpDetails() != nil {
+		t.Error("without a program to send messages to there is nothing to do")
+	}
+
+	m.send = func(tea.Msg) {}
+	if m.lookUpDetails() == nil {
+		t.Error("with a finished search and rows without details, a lookup should start")
+	}
+	if !m.detailsAsked["vid00000"] {
+		t.Error("the rows asked for must be remembered, so they are not asked again")
+	}
+	m.Close()
+}
+
+func TestPreviewSaysDetailsAreLoadingUntilTheyArriveOrFail(t *testing.T) {
+	m := detailModel(3, 0)
+	m.width, m.height = 140, 40
+
+	render := func() string { return m.renderPreview(60, 30) }
+
+	if out := render(); !strings.Contains(out, "Loading details...") {
+		t.Errorf("a row without details should say they are loading:\n%s", out)
+	}
+
+	m.detailsFailed = map[string]bool{"vid00000": true}
+	if out := render(); strings.Contains(out, "Loading details...") || !strings.Contains(out, "No description") {
+		t.Errorf("after a failed lookup the preview should stop waiting:\n%s", out)
+	}
+
+	m.items[0].Detailed = true
+	m.items[0].Description = "A real description."
+	if out := render(); !strings.Contains(out, "A real description.") {
+		t.Errorf("the description should show once it is known:\n%s", out)
+	}
+}

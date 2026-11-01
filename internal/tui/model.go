@@ -100,6 +100,13 @@ type downloadDoneMsg struct {
 
 type animationMsg struct{}
 
+// detailsFailedMsg means a detail lookup gave nothing for these videos, so the
+// preview stops saying that their details are loading.
+type detailsFailedMsg struct {
+	generation int
+	ids        []string
+}
+
 // detailsDelayMsg fires when a row has stayed selected for a moment.
 type detailsDelayMsg struct {
 	id         string
@@ -183,10 +190,11 @@ type Model struct {
 	searchError  string
 	status       string
 
-	generation   int
-	searchCancel context.CancelFunc
-	detailsAsked map[string]bool // results whose details were already requested one by one
-	searchEvents <-chan youtube.Event
+	generation    int
+	searchCancel  context.CancelFunc
+	detailsAsked  map[string]bool // results whose details were already requested
+	detailsFailed map[string]bool // results whose detail lookup gave nothing
+	searchEvents  <-chan youtube.Event
 
 	items         []media.Video
 	ranks         []int // ranks[i] is the sort rank of items[i], see youtube.Event.Rank
@@ -390,6 +398,7 @@ func (m *Model) startStream(
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.searchCancel = cancel
 	m.detailsAsked = map[string]bool{}
+	m.detailsFailed = map[string]bool{}
 	m.resetArrivals()
 	m.generation++
 	generation := m.generation
@@ -641,7 +650,20 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.generation != m.generation || m.selectedID() != msg.id {
 			return m, nil
 		}
-		return m, m.lookUpSelectedDetails()
+		return m, m.lookUpDetails()
+
+	case detailsFailedMsg:
+		if msg.generation == m.generation {
+			if m.detailsFailed == nil {
+				m.detailsFailed = map[string]bool{}
+			}
+
+			for _, id := range msg.ids {
+				m.detailsFailed[id] = true
+			}
+		}
+
+		return m, nil
 
 	case detailsLoadedMsg:
 		if msg.generation != m.generation {
@@ -925,7 +947,7 @@ func (m *Model) handleSearchEvent(event youtube.Event) []tea.Cmd {
 		if len(m.items) > 0 && len(m.playing) == 0 {
 			m.status = m.resultsStatus()
 		}
-		return []tea.Cmd{m.lookUpSelectedDetails()}
+		return []tea.Cmd{m.lookUpDetails()}
 	}
 	return nil
 }
@@ -1555,12 +1577,14 @@ func (m *Model) selectedID() string {
 	return v.ID
 }
 
-// detailsDelay is how long a row stays selected before its details are looked
-// up, so scrolling past rows does not start a yt-dlp run for each.
+// detailsDelay is how long a row stays selected before the details of the rows
+// around it are looked up, so scrolling past rows does not start a lookup for
+// each.
 const detailsDelay = 400 * time.Millisecond
 
 // scheduleThumbnail is called whenever the selection may have changed. It
-// schedules the thumbnail and, for a row without details, its detail lookup.
+// schedules the thumbnail and, once the row stays selected, the detail lookups
+// of the rows around it.
 func (m *Model) scheduleThumbnail() tea.Cmd {
 	cmds := []tea.Cmd{m.scheduleThumbnailLoad()}
 
@@ -1572,7 +1596,7 @@ func (m *Model) scheduleThumbnail() tea.Cmd {
 		}))
 	}
 
-	if v, ok := m.selectedVideo(); ok && !v.Detailed {
+	if v, ok := m.selectedVideo(); ok {
 		id, generation := v.ID, m.generation
 		cmds = append(cmds, tea.Tick(detailsDelay, func(time.Time) tea.Msg {
 			return detailsDelayMsg{id: id, generation: generation}
@@ -1582,32 +1606,101 @@ func (m *Model) scheduleThumbnail() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// lookUpSelectedDetails fetches the details of the selected row when the
-// search did not. The search itself only looks up the first rows, to keep the
-// CPU use of a search low. It waits until the search has finished its own
-// lookups, so the same result is not fetched twice.
-func (m *Model) lookUpSelectedDetails() tea.Cmd {
-	v, ok := m.selectedVideo()
-	if !ok || v.Detailed || !m.metadataDone || m.detailsAsked[v.ID] {
+// detailTargets lists the rows that need a detail lookup: the selected row,
+// then the rows around it, below first. Rows that have details or were asked
+// for already are left out. A playlist is looked up only when it is selected,
+// because that costs a yt-dlp run.
+func (m *Model) detailTargets() []media.Video {
+	var targets []media.Video
+
+	add := func(offset int) {
+		index := m.selected + offset
+		if index < 0 || index >= len(m.items) {
+			return
+		}
+
+		v := m.items[index]
+		if v.Detailed || m.detailsAsked[v.ID] || (offset != 0 && v.IsPlaylist()) {
+			return
+		}
+
+		targets = append(targets, v)
+	}
+
+	add(0)
+
+	for offset := 1; offset <= prefetchAhead; offset++ {
+		add(offset)
+
+		if offset <= prefetchBehind {
+			add(-offset)
+		}
+	}
+
+	return targets
+}
+
+// lookUpDetails fetches the details of the selected row and of the rows around
+// it. The search does not look them up itself, because that is its main CPU
+// cost; this way only the rows you are likely to see are looked up. It waits
+// until the search has finished, so the two do not compete. The details come
+// back as messages, one at a time, as soon as each is ready.
+func (m *Model) lookUpDetails() tea.Cmd {
+	if m.send == nil || !m.metadataDone {
+		return nil
+	}
+
+	targets := m.detailTargets()
+	if len(targets) == 0 {
 		return nil
 	}
 
 	if m.detailsAsked == nil {
 		m.detailsAsked = map[string]bool{}
 	}
-	m.detailsAsked[v.ID] = true
 
-	ctx, generation, loc := m.ctx, m.generation, m.locale()
+	for _, v := range targets {
+		m.detailsAsked[v.ID] = true
+	}
+
+	ctx, generation, loc, send := m.backgroundContext(), m.generation, m.locale(), m.send
 
 	return func() tea.Msg {
-		var got media.Video
-		_ = youtube.FetchDetailsBatch(ctx, []media.Video{v}, loc, func(d media.Video) { got = d })
-		if got.ID == "" {
-			return nil
+		got := map[string]bool{}
+
+		_ = youtube.FetchDetailsBatch(ctx, targets, loc, func(d media.Video) {
+			got[d.ID] = true
+			send(detailsLoadedMsg{generation: generation, video: d})
+		})
+
+		if ctx.Err() != nil {
+			return nil // a new search started; these videos are not wanted
 		}
 
-		return detailsLoadedMsg{generation: generation, video: got}
+		var failed []string
+		for _, v := range targets {
+			if !got[v.ID] {
+				failed = append(failed, v.ID)
+			}
+		}
+
+		if len(failed) > 0 {
+			send(detailsFailedMsg{generation: generation, ids: failed})
+		}
+
+		return nil
 	}
+}
+
+// backgroundContext is the context of the downloads that run in the
+// background: thumbnail prefetch and detail lookups. A new search or quitting
+// cancels it.
+func (m *Model) backgroundContext() context.Context {
+	if m.prefetchCtx == nil {
+		m.prefetchCtx, m.prefetchCancel = context.WithCancel(m.ctx)
+	}
+
+	return m.prefetchCtx
 }
 
 // setThumbnail remembers the file of a downloaded thumbnail. A refreshed one
@@ -1805,9 +1898,7 @@ func (m *Model) prefetchNeighbors() tea.Cmd {
 		return nil
 	}
 
-	if m.prefetchCtx == nil {
-		m.prefetchCtx, m.prefetchCancel = context.WithCancel(m.ctx)
-	}
+	ctx := m.backgroundContext()
 
 	if m.prefetchTried == nil {
 		m.prefetchTried = map[string]bool{}
@@ -1817,7 +1908,7 @@ func (m *Model) prefetchNeighbors() tea.Cmd {
 		m.prefetchTried[v.ID] = true
 	}
 
-	return prefetchThumbnails(m.prefetchCtx, targets, m.send)
+	return prefetchThumbnails(ctx, targets, m.send)
 }
 
 // prefetchThumbnails downloads the thumbnails in order with a few workers and
@@ -2484,7 +2575,7 @@ func (m *Model) streamSection(v media.Video, width int) ([]string, lipgloss.Styl
 			lines = append(lines, entryLine(entry, width))
 		}
 
-		if len(v.Entries) == 0 && !m.metadataDone {
+		if len(v.Entries) == 0 && !v.Detailed && !m.detailsFailed[v.ID] {
 			lines = append(lines, "Loading videos...")
 		}
 
@@ -2586,7 +2677,7 @@ func (m *Model) renderPreview(width, height int) string {
 
 		description := strings.TrimSpace(v.Description)
 		if description == "" {
-			if !m.metadataDone {
+			if !v.Detailed && !m.detailsFailed[v.ID] {
 				description = "Loading details..."
 			} else {
 				description = "No description"

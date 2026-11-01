@@ -18,12 +18,6 @@ func TestSearchIncludesLiveOrientedResults(t *testing.T) {
 	binDir := t.TempDir()
 	fake := `#!/bin/sh
 args="$*"
-if echo "$args" | grep -q -- '--dump-single-json'; then
-  # A batch holds several URLs, so every match is printed.
-  case "$args" in *v=live12345*) printf '%s\n' '{"id":"live12345","title":"Live coding right now","webpage_url":"https://www.youtube.com/watch?v=live12345","live_status":"is_live","is_live":true,"concurrent_view_count":42,"description":"Current live stream"}' ;; esac
-  case "$args" in *v=video12345*) printf '%s\n' '{"id":"video12345","title":"Go interfaces recorded","webpage_url":"https://www.youtube.com/watch?v=video12345","live_status":"was_live","was_live":true,"duration":900,"description":"Recorded stream"}' ;; esac
-  exit 0
-fi
 case "$args" in
   *LIVEPAGE*)
     printf '%s\n' '{"id":"live12345","title":"Live coding right now","webpage_url":"https://www.youtube.com/watch?v=live12345","live_status":"is_live"}'
@@ -464,6 +458,9 @@ esac
 		}
 	}
 	calls, _ := os.ReadFile(log)
+	if strings.Contains(string(calls), "--dump-single-json") {
+		t.Errorf("a search must not look up details, calls:\n%s", calls)
+	}
 	if strings.Contains(string(calls), "sp=") {
 		t.Errorf("the live and playlist pages must not be requested, calls:\n%s", calls)
 	}

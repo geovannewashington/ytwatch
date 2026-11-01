@@ -214,8 +214,8 @@ var fetchResultsPage = func(ctx context.Context, pageURL string, loc locale.Loca
 	return io.ReadAll(io.LimitReader(response.Body, 16*1024*1024))
 }
 
-// runShortsQuery fetches the Shorts of a results page and queues each one for
-// a detail lookup, which adds the length, channel and age. limit caps how many
+// runShortsQuery fetches the Shorts of a results page. Their length, channel
+// and age come later, from a detail lookup. limit caps how many
 // are used (0 means all), and rank gives each one its place in the list.
 func runShortsQuery(
 	ctx context.Context,
@@ -226,7 +226,6 @@ func runShortsQuery(
 	rank func(position int, title string) int,
 	seen *sync.Map,
 	uniqueCount *atomic.Int64,
-	jobs chan<- media.Video,
 	emit func(Event),
 ) queryResult {
 	page, err := fetchResultsPage(ctx, shortsURL(query, f, loc), loc)
@@ -254,11 +253,6 @@ func runShortsQuery(
 			Count: int(uniqueCount.Add(1)),
 			Rank:  rank(position, short.Title),
 		})
-
-		select {
-		case jobs <- short:
-		case <-ctx.Done():
-		}
 	}
 
 	return queryResult{rows: len(shorts)}
