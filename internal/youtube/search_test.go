@@ -25,7 +25,7 @@ if echo "$args" | grep -q -- '--dump-single-json'; then
   exit 0
 fi
 case "$args" in
-  *'ytsearch20:Go interfaces live'*)
+  *LIVEPAGE*)
     printf '%s\n' '{"id":"live12345","title":"Live coding right now","webpage_url":"https://www.youtube.com/watch?v=live12345","live_status":"is_live"}'
     printf '%s\n' '{"id":"video12345","title":"Go interfaces recorded","webpage_url":"https://www.youtube.com/watch?v=video12345"}'
     ;;
@@ -35,6 +35,7 @@ case "$args" in
 esac
 `
 	fakePath := filepath.Join(binDir, "yt-dlp")
+	fake = strings.ReplaceAll(fake, "LIVEPAGE", "'"+resultsURL("Go interfaces", Filters{Type: TypeLive})+"'")
 	if err := os.WriteFile(fakePath, []byte(fake), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +91,7 @@ func TestSearchRanksResultsAndKeepsOnlyLiveFromTheLiveQuery(t *testing.T) {
 args="$*"
 case "$args" in
   *--dump-single-json*) exit 1 ;;
-  *'ytsearch20:topic live'*)
+  *LIVEPAGE*)
     printf '%s\n' '{"id":"junk000001","title":"Unrelated video"}'
     printf '%s\n' '{"id":"stream00001","title":"A stream","live_status":"is_live"}'
     ;;
@@ -104,6 +105,7 @@ case "$args" in
     ;;
 esac
 `
+	fake = strings.ReplaceAll(fake, "LIVEPAGE", "'"+resultsURL("topic", Filters{Type: TypeLive})+"'")
 	if err := os.WriteFile(filepath.Join(binDir, "yt-dlp"), []byte(fake), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -204,6 +206,7 @@ func TestFetchDetailsBatchUsesOneRunForSeveralVideos(t *testing.T) {
 	fake := "#!/bin/sh\necho run >> " + log + "\n" +
 		`printf '%s\n' '{"id":"bbbbbbbbbbb","title":"B","duration":20}'` + "\n" +
 		`printf '%s\n' '{"id":"aaaaaaaaaaa","title":"A","duration":10}'` + "\n"
+	fake = strings.ReplaceAll(fake, "LIVEPAGE", "'"+resultsURL("topic", Filters{Type: TypeLive})+"'")
 	if err := os.WriteFile(filepath.Join(binDir, "yt-dlp"), []byte(fake), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -226,5 +229,150 @@ func TestFetchDetailsBatchUsesOneRunForSeveralVideos(t *testing.T) {
 	data, _ := os.ReadFile(log)
 	if runs := strings.Count(string(data), "run"); runs != 1 {
 		t.Fatalf("yt-dlp ran %d times, want 1", runs)
+	}
+}
+
+func TestSearchHidesTheChannelAndPutsItsLiveStreamFirst(t *testing.T) {
+	binDir := t.TempDir()
+	fake := `#!/bin/sh
+args="$*"
+case "$args" in
+  *--dump-single-json*) exit 1 ;;
+  *LIVEPAGE*)
+    printf '%s\n' '{"id":"stream00001","title":"Own stream","live_status":"is_live","channel_id":"UCchannel1"}'
+    printf '%s\n' '{"id":"stream00002","title":"Other stream","live_status":"is_live","channel_id":"UCother"}'
+    ;;
+  *'ytsearch35:topic'*)
+    printf '%s\n' '{"id":"UCchannel1","title":"Topic","url":"https://www.youtube.com/channel/UCchannel1"}'
+    printf '%s\n' '{"id":"first000001","title":"First","channel_id":"UCchannel1"}'
+    printf '%s\n' '{"id":"second00001","title":"Second"}'
+    ;;
+esac
+`
+	fake = strings.ReplaceAll(fake, "LIVEPAGE", "'"+resultsURL("topic", Filters{Type: TypeLive})+"'")
+	if err := os.WriteFile(filepath.Join(binDir, "yt-dlp"), []byte(fake), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var mu sync.Mutex
+	rank := map[string]int{}
+	Search(ctx, "topic", Filters{}, locale.Locale{}, func(event Event) {
+		if event.Kind == EventResult {
+			mu.Lock()
+			rank[event.Video.ID] = event.Rank
+			mu.Unlock()
+		}
+	})
+	if _, found := rank["UCchannel1"]; found {
+		t.Error("the channel must not be a result")
+	}
+	if rank["stream00001"] >= rank["first000001"] {
+		t.Errorf("the channel's own stream should come first, ranks: %v", rank)
+	}
+	if rank["stream00002"] <= rank["second00001"] {
+		t.Errorf("a stream of another channel keeps its normal place, ranks: %v", rank)
+	}
+}
+
+func TestFoldNameIgnoresAccentsCaseAndPunctuation(t *testing.T) {
+	for in, want := range map[string]string{
+		"CazéTV":    "cazetv",
+		"Lofi Girl": "lofigirl",
+		"Ação! 24h": "acao24h",
+	} {
+		if got := foldName(in); got != want {
+			t.Errorf("foldName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestChannelMatchByNameNeedsALongEnoughName(t *testing.T) {
+	c := newTopChannel("cazetv ao vivo", 1)
+	if !c.matches(media.Video{Channel: "CazéTV"}, "") {
+		t.Error("the channel name inside the query should match")
+	}
+	if c.matches(media.Video{Channel: "Other Channel"}, "") {
+		t.Error("a different channel must not match")
+	}
+	short := newTopChannel("go tutorial", 1)
+	if short.matches(media.Video{Channel: "Go"}, "") {
+		t.Error("a very short channel name must not match by name")
+	}
+	if c.matches(media.Video{Channel: "CazéTV", ChannelID: "UCa"}, "UCb") {
+		t.Error("with a channel ID, only that channel matches")
+	}
+}
+
+// runFakeSearch runs Search for "topic" with a fake yt-dlp and returns the rank
+// of every result.
+func runFakeSearch(t *testing.T, fake string) map[string]int {
+	t.Helper()
+	binDir := t.TempDir()
+	fake = strings.ReplaceAll(fake, "LIVEPAGE", "'"+resultsURL("topic", Filters{Type: TypeLive})+"'")
+	if err := os.WriteFile(filepath.Join(binDir, "yt-dlp"), []byte(fake), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var mu sync.Mutex
+	rank := map[string]int{}
+	Search(ctx, "topic", Filters{}, locale.Locale{}, func(event Event) {
+		if event.Kind == EventResult {
+			mu.Lock()
+			rank[event.Video.ID] = event.Rank
+			mu.Unlock()
+		}
+	})
+	return rank
+}
+
+func TestSearchFindsTheChannelsStreamsByNameWhenNoChannelIsReturned(t *testing.T) {
+	rank := runFakeSearch(t, `#!/bin/sh
+case "$*" in
+  *--dump-single-json*) exit 1 ;;
+  *LIVEPAGE*)
+    printf '%s\n' '{"id":"streamname01","title":"Named","live_status":"is_live","channel":"Tópic"}'
+    printf '%s\n' '{"id":"streamother01","title":"Other","live_status":"is_live","channel":"Somebody"}'
+    ;;
+  *'ytsearch35:topic'*)
+    printf '%s\n' '{"id":"first000001","title":"First"}'
+    printf '%s\n' '{"id":"second00001","title":"Second"}'
+    ;;
+esac
+`)
+	if rank["streamname01"] >= rank["first000001"] {
+		t.Errorf("a stream of the channel named in the query should come first, ranks: %v", rank)
+	}
+	if rank["streamother01"] <= rank["second00001"] {
+		t.Errorf("a stream of another channel keeps its normal place, ranks: %v", rank)
+	}
+}
+
+func TestSearchTakesTheChannelFromTheLivePageToo(t *testing.T) {
+	rank := runFakeSearch(t, `#!/bin/sh
+case "$*" in
+  *--dump-single-json*) exit 1 ;;
+  *LIVEPAGE*)
+    printf '%s\n' '{"id":"UCchannel1","title":"Some name","url":"https://www.youtube.com/channel/UCchannel1"}'
+    printf '%s\n' '{"id":"streamown001","title":"Own","live_status":"is_live","channel_id":"UCchannel1","channel":"Unrelated name"}'
+    printf '%s\n' '{"id":"streamother01","title":"Other","live_status":"is_live","channel_id":"UCother","channel":"Topic"}'
+    ;;
+  *'ytsearch35:topic'*)
+    printf '%s\n' '{"id":"first000001","title":"First"}'
+    ;;
+esac
+`)
+	if _, found := rank["UCchannel1"]; found {
+		t.Error("the channel must not be a result")
+	}
+	if rank["streamown001"] >= rank["first000001"] {
+		t.Errorf("the matched channel's stream should come first, ranks: %v", rank)
+	}
+	if rank["streamother01"] <= rank["first000001"] {
+		t.Errorf("with a channel ID, a stream of another channel must not be boosted, ranks: %v", rank)
 	}
 }

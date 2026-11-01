@@ -21,6 +21,7 @@ type Video struct {
 	URL               string  `json:"url"`
 	Channel           string  `json:"channel"`
 	ChannelURL        string  `json:"channel_url"`
+	ChannelID         string  `json:"channel_id"`
 	Uploader          string  `json:"uploader"`
 	Duration          float64 `json:"duration"`
 	DurationString    string  `json:"duration_string"`
@@ -165,6 +166,21 @@ func (v Video) IsShort() bool {
 }
 
 // IsPlaylist reports whether the result is a playlist instead of one video.
+// IsChannel reports whether the entry is a channel and not a video. yt-dlp's
+// search can return the channel that matches the query as its first result.
+func (v Video) IsChannel() bool {
+	parsed, err := url.Parse(v.CanonicalURL())
+	if err != nil {
+		return false
+	}
+	for _, prefix := range []string{"/channel/", "/@", "/user/", "/c/"} {
+		if strings.HasPrefix(parsed.Path, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func (v Video) IsPlaylist() bool {
 	return strings.Contains(v.CanonicalURL(), "/playlist?list=")
 }

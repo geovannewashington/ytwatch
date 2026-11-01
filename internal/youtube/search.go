@@ -14,6 +14,11 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	"unicode"
+
+	"golang.org/x/text/runes"
+	"golang.org/x/text/transform"
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/geovannewashington/ytwatch/internal/locale"
 	"github.com/geovannewashington/ytwatch/internal/media"
@@ -83,6 +88,103 @@ var (
 	errBrowseTimedOut = errors.New("loading timed out; showing the videos found so far")
 )
 
+// channelStreamBoost moves the streams that are on air now from the channel the
+// user searched for above every other result. It keeps the order within the
+// group, and ranks of different sources still never tie.
+const channelStreamBoost = 1_000_000
+
+// channelLookahead is how many results the main query reads before it gives up
+// on finding a channel among them.
+const channelLookahead = 5
+
+// topChannel is the channel that YouTube matched to the query, found by the
+// main query. The live query waits for it, because a stream is promoted only
+// when it belongs to that channel.
+type topChannel struct {
+	once    sync.Once
+	ready   chan struct{}
+	id      string // written once before ready is closed
+	query   string // the search text, folded by foldName
+	pending atomic.Int32
+}
+
+// newTopChannel makes a topChannel that is settled by the first channel found
+// or, when none is, after sources calls of finish.
+func newTopChannel(query string, sources int) *topChannel {
+	c := &topChannel{ready: make(chan struct{}), query: foldName(query)}
+	c.pending.Store(int32(sources))
+	return c
+}
+
+// finish says that one source has given up looking for the channel.
+func (c *topChannel) finish() {
+	if c.pending.Add(-1) <= 0 {
+		c.settle("")
+	}
+}
+
+// matches reports whether a stream belongs to the channel the user searched
+// for. With a channel ID that is exact. Without one (YouTube does not always
+// return the channel among the results) the channel name is compared with the
+// query instead: typing the name of a channel is the usual way to look for it.
+func (c *topChannel) matches(v media.Video, id string) bool {
+	if id != "" {
+		return v.ChannelID == id
+	}
+	name := foldName(v.Channel)
+	return len([]rune(name)) >= minChannelNameLength && strings.Contains(c.query, name)
+}
+
+// minChannelNameLength keeps very short channel names, which are common words
+// inside other queries, from matching by name.
+const minChannelNameLength = 4
+
+// nameFolder removes accents, so "CazéTV" and "cazetv" compare equal.
+var nameFolder = transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC)
+
+// foldName lowercases s, removes accents and keeps only letters and digits.
+func foldName(s string) string {
+	plain, _, err := transform.String(nameFolder, s)
+	if err != nil {
+		plain = s
+	}
+	var b strings.Builder
+	for _, r := range strings.ToLower(plain) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// settle fixes the channel ID, or "" for no channel. Only the first call counts.
+func (c *topChannel) settle(id string) {
+	c.once.Do(func() {
+		c.id = id
+		close(c.ready)
+	})
+}
+
+// current is the channel ID if it is known already, otherwise "".
+func (c *topChannel) current() string {
+	select {
+	case <-c.ready:
+		return c.id
+	default:
+		return ""
+	}
+}
+
+// wait blocks until the channel is known or the search ends.
+func (c *topChannel) wait(ctx context.Context) string {
+	select {
+	case <-c.ready:
+		return c.id
+	case <-ctx.Done():
+		return ""
+	}
+}
+
 type queryResult struct {
 	rows int
 	err  error
@@ -111,6 +213,8 @@ func Search(ctx context.Context, query string, filters Filters, loc locale.Local
 	var seen sync.Map
 	var uniqueCount atomic.Int64
 	var searchWG sync.WaitGroup
+	// The main query and the live page can each return the matched channel.
+	channel := newTopChannel(query, 2)
 	var queries []func() queryResult
 	if filters.Active() {
 		if filters.Type == TypeShorts {
@@ -123,18 +227,19 @@ func Search(ctx context.Context, query string, filters Filters, loc locale.Local
 			})
 		} else {
 			queries = append(queries, func() queryResult {
-				return runQuery(searchCtx, resultsURL(query, filters), filteredResultCount, loc, mainRanking, filters.Type == TypeLive, &seen, &uniqueCount, regularJobs, liveJobs, emit)
+				return runQuery(searchCtx, resultsURL(query, filters), filteredResultCount, loc, mainRanking, filters.Type == TypeLive, nil, &seen, &uniqueCount, regularJobs, liveJobs, emit)
 			})
 		}
 	} else {
 		queries = append(queries,
 			func() queryResult {
-				return runQuery(searchCtx, fmt.Sprintf("ytsearch%d:%s", videoResultCount, query), 0, loc, mainRanking, false, &seen, &uniqueCount, regularJobs, liveJobs, emit)
+				return runQuery(searchCtx, fmt.Sprintf("ytsearch%d:%s", videoResultCount, query), 0, loc, mainRanking, false, channel, &seen, &uniqueCount, regularJobs, liveJobs, emit)
 			},
 			func() queryResult {
-				// Adding "live" broadens discovery of currently broadcasting channels.
-				// Full metadata still determines whether a result is actually live or a VOD.
-				return runQuery(searchCtx, fmt.Sprintf("ytsearch%d:%s live", liveResultCount, query), 0, loc, liveRanking, true, &seen, &uniqueCount, regularJobs, liveJobs, emit)
+				// The results page filtered to live streams, in YouTube's own
+				// order. The normal search misses streams that YouTube shows
+				// in a "live now" card, and has no viewer-based order.
+				return runQuery(searchCtx, resultsURL(query, Filters{Type: TypeLive}), liveResultCount, loc, liveRanking, true, channel, &seen, &uniqueCount, regularJobs, liveJobs, emit)
 			},
 			func() queryResult {
 				return runPlaylistQuery(searchCtx, playlistSearchURL(query), playlistCount, loc, playlistRanking, &seen, &uniqueCount, liveJobs, emit)
@@ -272,12 +377,23 @@ func runQuery(
 	loc locale.Locale,
 	order ranking,
 	prioritizeLive bool,
+	channel *topChannel,
 	seen *sync.Map,
 	uniqueCount *atomic.Int64,
 	regularJobs chan<- media.Video,
 	liveJobs chan<- media.Video,
 	emit func(Event),
 ) queryResult {
+	// A query that is done looking for the channel tells so, once; the
+	// channel is "none" only when all of them are done.
+	channelChecked := false
+	checkedChannel := func() {
+		if channel != nil && !channelChecked {
+			channelChecked = true
+			channel.finish()
+		}
+	}
+	defer checkedChannel()
 	args := []string{
 		"--flat-playlist", "--dump-json", "--no-warnings", "--ignore-errors",
 		"--skip-download", "--socket-timeout", "7",
@@ -312,8 +428,19 @@ func runQuery(
 		if err := json.Unmarshal(scanner.Bytes(), &video); err != nil || video.ID == "" {
 			continue
 		}
+		if video.IsChannel() {
+			// A channel is not a video and has no page here. Its ID tells which
+			// streams belong to the channel the user searched for.
+			if channel != nil {
+				channel.settle(video.ID)
+			}
+			continue
+		}
 		position := rows
 		rows++
+		if rows >= channelLookahead {
+			checkedChannel() // no channel among the first results
+		}
 		if unavailable(video.Title) {
 			continue
 		}
@@ -330,7 +457,18 @@ func runQuery(
 		_, duplicate := seen.LoadOrStore(video.ID, struct{}{})
 		if !duplicate {
 			count := int(uniqueCount.Add(1))
-			emit(Event{Kind: EventResult, Video: video, Count: count, Rank: order.at(position)})
+			rank := order.at(position)
+			if channel != nil && video.IsCurrentlyLive() {
+				id := channel.current()
+				if prioritizeLive {
+					checkedChannel() // do not wait for ourselves
+					id = channel.wait(ctx)
+				}
+				if channel.matches(video, id) {
+					rank -= channelStreamBoost
+				}
+			}
+			emit(Event{Kind: EventResult, Video: video, Count: count, Rank: rank})
 			if prioritizeLive {
 				select {
 				case liveJobs <- video:

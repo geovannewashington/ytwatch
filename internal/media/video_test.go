@@ -159,3 +159,18 @@ func TestDurationTextFormatsShortsAsMinutesAndSeconds(t *testing.T) {
 		}
 	}
 }
+
+func TestIsChannelRecognizesChannelEntriesOnly(t *testing.T) {
+	cases := map[string]bool{
+		"https://www.youtube.com/channel/UCSJ4gkVC6NrvII8umztf0Ow": true,
+		"https://www.youtube.com/@LofiGirl":                        true,
+		"https://www.youtube.com/watch?v=rFZHOHl-L8A":              false,
+		"https://www.youtube.com/playlist?list=PL123456":           false,
+		"https://www.youtube.com/shorts/abcdefghijk":               false,
+	}
+	for rawURL, want := range cases {
+		if got := (Video{URL: rawURL}).IsChannel(); got != want {
+			t.Errorf("IsChannel(%s) = %v, want %v", rawURL, got, want)
+		}
+	}
+}
