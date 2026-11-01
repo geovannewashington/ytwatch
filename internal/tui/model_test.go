@@ -1128,3 +1128,37 @@ func TestOnlyOldThumbnailsOfStreamsAreStale(t *testing.T) {
 		t.Error("the thumbnail of a recording never goes stale")
 	}
 }
+
+func TestSearchResultsAreCappedAtTheLimitKeepingTheBestRanked(t *testing.T) {
+	m := New("")
+	// The worst results arrive first, as they can when queries finish in any order.
+	for i := youtube.ResultLimit + 9; i >= 0; i-- {
+		m.insertResult(media.Video{ID: fmt.Sprintf("vid%05d", i)}, i*10)
+	}
+	if len(m.items) != youtube.ResultLimit || len(m.ranks) != youtube.ResultLimit {
+		t.Fatalf("got %d items and %d ranks, want %d", len(m.items), len(m.ranks), youtube.ResultLimit)
+	}
+	if m.items[0].ID != "vid00000" || m.items[len(m.items)-1].ID != fmt.Sprintf("vid%05d", youtube.ResultLimit-1) {
+		t.Errorf("the best ranked results should stay, got first %s last %s", m.items[0].ID, m.items[len(m.items)-1].ID)
+	}
+	m.insertResult(media.Video{ID: "late0000001"}, 1<<20) // worse than all of them
+	if len(m.items) != youtube.ResultLimit {
+		t.Errorf("a result ranked beyond the limit must be ignored, got %d items", len(m.items))
+	}
+	m.selected = len(m.items) - 1
+	m.insertResult(media.Video{ID: "best0000001"}, -1)
+	if m.selected >= len(m.items) {
+		t.Errorf("the selection must stay inside the list, got %d of %d", m.selected, len(m.items))
+	}
+}
+
+func TestPlaylistListsAreNotCapped(t *testing.T) {
+	m := New("")
+	m.parents = []resultsState{{}} // inside a playlist
+	for i := 0; i < youtube.ResultLimit+20; i++ {
+		m.insertResult(media.Video{ID: fmt.Sprintf("vid%05d", i)}, i*10)
+	}
+	if len(m.items) != youtube.ResultLimit+20 {
+		t.Errorf("a playlist keeps all its videos, got %d", len(m.items))
+	}
+}

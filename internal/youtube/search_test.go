@@ -29,7 +29,7 @@ case "$args" in
     printf '%s\n' '{"id":"live12345","title":"Live coding right now","webpage_url":"https://www.youtube.com/watch?v=live12345","live_status":"is_live"}'
     printf '%s\n' '{"id":"video12345","title":"Go interfaces recorded","webpage_url":"https://www.youtube.com/watch?v=video12345"}'
     ;;
-  *'ytsearch35:Go interfaces'*)
+  *'ytsearch50:Go interfaces'*)
     printf '%s\n' '{"id":"video12345","title":"Go interfaces recorded","webpage_url":"https://www.youtube.com/watch?v=video12345"}'
     ;;
 esac
@@ -95,7 +95,7 @@ case "$args" in
     printf '%s\n' '{"id":"junk000001","title":"Unrelated video"}'
     printf '%s\n' '{"id":"stream00001","title":"A stream","live_status":"is_live"}'
     ;;
-  *'ytsearch35:topic'*)
+  *'ytsearch50:topic'*)
     printf '%s\n' '{"id":"first000001","title":"First"}'
     printf '%s\n' '{"id":"second00001","title":"Second"}'
     printf '%s\n' '{"id":"third000001","title":"Third"}'
@@ -178,7 +178,7 @@ func TestRanksOfDifferentSourcesNeverTie(t *testing.T) {
 		}
 		seen[rank] = source
 	}
-	for p := 0; p < videoResultCount; p++ {
+	for p := 0; p < fetchCount(videoResultCount, map[media.Kind]bool{media.KindPastLive: true}); p++ {
 		add(mainRanking.at(p), "main")
 	}
 	for p := 0; p < playlistCount; p++ {
@@ -242,7 +242,7 @@ case "$args" in
     printf '%s\n' '{"id":"stream00001","title":"Own stream","live_status":"is_live","channel_id":"UCchannel1"}'
     printf '%s\n' '{"id":"stream00002","title":"Other stream","live_status":"is_live","channel_id":"UCother"}'
     ;;
-  *'ytsearch35:topic'*)
+  *'ytsearch50:topic'*)
     printf '%s\n' '{"id":"UCchannel1","title":"Topic","url":"https://www.youtube.com/channel/UCchannel1"}'
     printf '%s\n' '{"id":"first000001","title":"First","channel_id":"UCchannel1"}'
     printf '%s\n' '{"id":"second00001","title":"Second"}'
@@ -338,7 +338,7 @@ case "$*" in
     printf '%s\n' '{"id":"streamname01","title":"Named","live_status":"is_live","channel":"Tópic"}'
     printf '%s\n' '{"id":"streamother01","title":"Other","live_status":"is_live","channel":"Somebody"}'
     ;;
-  *'ytsearch35:topic'*)
+  *'ytsearch50:topic'*)
     printf '%s\n' '{"id":"first000001","title":"First"}'
     printf '%s\n' '{"id":"second00001","title":"Second"}'
     ;;
@@ -361,7 +361,7 @@ case "$*" in
     printf '%s\n' '{"id":"streamown001","title":"Own","live_status":"is_live","channel_id":"UCchannel1","channel":"Unrelated name"}'
     printf '%s\n' '{"id":"streamother01","title":"Other","live_status":"is_live","channel_id":"UCother","channel":"Topic"}'
     ;;
-  *'ytsearch35:topic'*)
+  *'ytsearch50:topic'*)
     printf '%s\n' '{"id":"first000001","title":"First"}'
     ;;
 esac
@@ -411,7 +411,7 @@ case "$*" in
   *LIVEPAGE*)
     printf '%s\n' '{"id":"onair000001","title":"On air","live_status":"is_live"}'
     ;;
-  *'ytsearch35:topic'*)
+  *ytsearch*:topic*)
     printf '%s\n' '{"id":"plain000001","title":"Plain"}'
     printf '%s\n' '{"id":"vod0000001","title":"Recorded","live_status":"was_live"}'
     printf '%s\n' '{"id":"soon0000001","title":"Soon","live_status":"is_upcoming"}'
@@ -447,5 +447,17 @@ esac
 	calls, _ := os.ReadFile(log)
 	if strings.Contains(string(calls), "sp=") {
 		t.Errorf("the live and playlist pages must not be requested, calls:\n%s", calls)
+	}
+}
+
+func TestFetchCountAsksForMoreOnlyWhenStreamsOrRecordingsAreHidden(t *testing.T) {
+	if got := fetchCount(ResultLimit, nil); got != ResultLimit {
+		t.Errorf("nothing hidden: got %d", got)
+	}
+	if got := fetchCount(ResultLimit, map[media.Kind]bool{media.KindShort: true, media.KindPlaylist: true}); got != ResultLimit {
+		t.Errorf("Shorts and playlists come from other queries, so no extra: got %d", got)
+	}
+	if got := fetchCount(ResultLimit, map[media.Kind]bool{media.KindPastLive: true}); got != ResultLimit*3/2 {
+		t.Errorf("hidden recordings need extra results: got %d", got)
 	}
 }

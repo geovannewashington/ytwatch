@@ -739,6 +739,15 @@ func (m *Model) insertResult(v media.Video, rank int) []tea.Cmd {
 			break
 		}
 	}
+	// A search shows its best ResultLimit results. Inside a playlist the list
+	// is the playlist, whatever its size.
+	capped := len(m.parents) == 0
+	if capped && at >= youtube.ResultLimit {
+		return nil
+	}
+	if capped {
+		defer m.trimResults()
+	}
 	m.items = slices.Insert(m.items, at, v)
 	m.ranks = slices.Insert(m.ranks, at, rank)
 	m.markArrived(v.ID)
@@ -765,6 +774,20 @@ func (m *Model) insertResult(v media.Video, rank int) []tea.Cmd {
 		return []tea.Cmd{m.scheduleThumbnail()}
 	}
 	return nil
+}
+
+// trimResults drops the worst ranked results beyond ResultLimit, which are the
+// last ones, and keeps the selection and the view valid.
+func (m *Model) trimResults() {
+	if len(m.items) <= youtube.ResultLimit {
+		return
+	}
+	m.items = m.items[:youtube.ResultLimit]
+	m.ranks = m.ranks[:youtube.ResultLimit]
+	last := len(m.items) - 1
+	m.selected = min(m.selected, last)
+	m.visualAnchor = min(m.visualAnchor, last)
+	m.keepSelectionVisible()
 }
 
 func (m *Model) handleSearchEvent(event youtube.Event) []tea.Cmd {

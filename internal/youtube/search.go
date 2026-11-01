@@ -30,14 +30,19 @@ const (
 	EventSearchDone = "search-done"
 	EventDetailsEnd = "details-done"
 
-	videoResultCount = 35
+	// ResultLimit is how many results a search shows, whatever the filters and
+	// [search] hide leave out. The sources together return more; the list keeps
+	// the best ranked ones.
+	ResultLimit = 50
+
+	videoResultCount = ResultLimit
 	liveResultCount  = 20
 	playlistCount    = 10
 	shortResultCount = 6
 
 	// A filtered search is one query on the results page.
-	filteredResultCount   = 50
-	filteredPlaylistCount = 30
+	filteredResultCount   = ResultLimit
+	filteredPlaylistCount = ResultLimit
 
 	// Detail lookups are the main CPU cost of a search: every yt-dlp run
 	// starts Python and loads all extractors. So they are batched, run by few
@@ -87,6 +92,16 @@ var (
 	errNoVideos       = errors.New("no videos found in this playlist")
 	errBrowseTimedOut = errors.New("loading timed out; showing the videos found so far")
 )
+
+// fetchCount is how many results the main query asks for. Streams and
+// recordings that are hidden are dropped from it, so it asks for half as many
+// again, to still have ResultLimit results to show.
+func fetchCount(count int, hidden map[media.Kind]bool) int {
+	if hidden[media.KindLive] || hidden[media.KindUpcoming] || hidden[media.KindPastLive] {
+		return count * 3 / 2
+	}
+	return count
+}
 
 // hiddenKinds is the set of kinds a search leaves out: those in [search] hide,
 // except the kinds that the filter asks for, so a Shorts search still finds
@@ -261,12 +276,12 @@ func Search(ctx context.Context, query string, filters Filters, hide []media.Kin
 			})
 		} else {
 			queries = append(queries, func() queryResult {
-				return runQuery(searchCtx, resultsURL(query, filters), filteredResultCount, loc, mainRanking, filters.Type == TypeLive, nil, hidden, &seen, &uniqueCount, regularJobs, liveJobs, emit)
+				return runQuery(searchCtx, resultsURL(query, filters), fetchCount(filteredResultCount, hidden), loc, mainRanking, filters.Type == TypeLive, nil, hidden, &seen, &uniqueCount, regularJobs, liveJobs, emit)
 			})
 		}
 	} else {
 		queries = append(queries, func() queryResult {
-			return runQuery(searchCtx, fmt.Sprintf("ytsearch%d:%s", videoResultCount, query), 0, loc, mainRanking, false, channel, hidden, &seen, &uniqueCount, regularJobs, liveJobs, emit)
+			return runQuery(searchCtx, fmt.Sprintf("ytsearch%d:%s", fetchCount(videoResultCount, hidden), query), 0, loc, mainRanking, false, channel, hidden, &seen, &uniqueCount, regularJobs, liveJobs, emit)
 		})
 		if !skipLive {
 			queries = append(queries, func() queryResult {
