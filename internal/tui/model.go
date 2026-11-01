@@ -238,7 +238,7 @@ func New(initialQuery string) *Model {
 	if m.query == "" {
 		m.searchMode = true
 		m.setInput("")
-		m.status = "Type your search and press Enter"
+		m.status = ""
 	}
 	return m
 }
@@ -291,7 +291,7 @@ func (m *Model) beginSearch(query string) tea.Cmd {
 	if query == "" {
 		m.searchMode = true
 		m.setInput(m.query)
-		m.status = "Type your search and press Enter"
+		m.status = ""
 		return nil
 	}
 	filters := m.filters
@@ -363,7 +363,7 @@ func (m *Model) startStream(status string, run func(ctx context.Context, emit fu
 // resultsStatus counts what the list shows.
 func (m *Model) resultsStatus() string {
 	if m.listTitle != "" {
-		return plural(len(m.items), "result") + noteMark + "Esc to go back"
+		return plural(len(m.items), "result")
 	}
 	return plural(len(m.items), "result")
 }
@@ -389,7 +389,7 @@ func (m *Model) openPlaylist(v media.Video) tea.Cmd {
 	m.parents = append(m.parents, resultsState{m.items, m.ranks, m.selected, m.top, m.listTitle, m.searching})
 	m.listTitle = clean(v.Title)
 	loc := m.locale()
-	cmd := m.startStream("Opening playlist..."+noteMark+"Esc to go back", func(ctx context.Context, emit func(youtube.Event)) {
+	cmd := m.startStream("Opening playlist...", func(ctx context.Context, emit func(youtube.Event)) {
 		youtube.Browse(ctx, url, loc, emit)
 	})
 	return cmd
@@ -725,11 +725,11 @@ func (m *Model) handleSearchEvent(event youtube.Event) []tea.Cmd {
 		m.searching = false
 		if event.Err != nil && len(m.items) == 0 {
 			m.searchError = clean(event.Err.Error())
-			m.status = "Search failed" + noteMark + "/ to try again"
+			m.status = "Search failed"
 		} else if len(m.items) == 0 && m.filters.Active() {
-			m.status = "No results · f to change filters"
+			m.status = "No results"
 		} else if len(m.items) == 0 {
-			m.status = "No results · / to search"
+			m.status = "No results"
 		} else {
 			m.status = m.resultsStatus()
 		}
@@ -796,7 +796,7 @@ func (m *Model) handleSearchInput(msg tea.KeyMsg) tea.Cmd {
 	case "enter":
 		query := strings.TrimSpace(m.searchInput)
 		if query == "" {
-			m.status = "Type your search and press Enter"
+			m.status = "Nothing to search"
 			return nil
 		}
 		return m.beginSearch(query)
@@ -921,7 +921,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.searchMode = true
 		m.setInput(m.query)
 		m.historyPos = -1
-		m.status = "Edit the search" + noteMark + "Up/Down for past searches · Esc to cancel"
+		m.status = "Edit the search"
 		return nil
 	case "?":
 		m.showHelp = true
@@ -2041,7 +2041,7 @@ func (m *Model) renderFooter() string {
 		style = fadeStyles()[phase+1]
 	}
 	if m.searchError != "" && len(m.items) == 0 {
-		status = m.searchError
+		status = "Search failed" // the pane has the reason
 		style = errorStyle
 		prefix = ""
 	}
@@ -2050,20 +2050,21 @@ func (m *Model) renderFooter() string {
 		style = shortBadgeStyle // yellow in every theme
 		prefix = ""
 	}
-	tags := ""
+	var tags []string
 	if summary := m.filters.Summary(); summary != "" {
-		tags += truncate(strings.ReplaceAll(summary, ", ", " · "), max(10, m.width/3)) + "  "
+		tags = append(tags, truncate(strings.ReplaceAll(summary, ", ", " · "), max(10, m.width/3)))
 	}
 	if m.quality != "" && m.quality != quality.Best {
-		tags += m.quality + "  "
+		tags = append(tags, m.quality)
 	}
 	if m.audioOnly {
-		tags += "♪ audio  "
+		tags = append(tags, "♪ audio")
 	}
 	if len(m.downloading) > 0 {
-		tags += fmt.Sprintf("⬇ %d  ", len(m.downloading))
+		tags = append(tags, fmt.Sprintf("⬇ %d", len(m.downloading)))
 	}
-	right := footerStyle.Render(tags + fmt.Sprintf("%d/%d", min(m.selected+1, len(m.items)), len(m.items)))
+	tags = append(tags, fmt.Sprintf("%d/%d", min(m.selected+1, len(m.items)), len(m.items)))
+	right := footerStyle.Render(strings.Join(tags, " · "))
 	leftWidth := max(10, m.width-lipgloss.Width(right)-2-lipgloss.Width(prefix))
 	left := prefix + renderStatus(status, style, leftWidth)
 	return left + "  " + right
@@ -2089,7 +2090,7 @@ func (m *Model) handleFilterKey(msg tea.KeyMsg) tea.Cmd {
 		m.showFilters = false
 		m.filters = m.filterDraft
 		if m.query == "" {
-			m.status = "Filters set" + noteMark + "/ to search"
+			m.status = "Filters set"
 			return nil
 		}
 		return m.beginSearch(m.query)
@@ -2471,8 +2472,8 @@ func renderStatus(status string, style lipgloss.Style, width int) string {
 	used := lipgloss.Width(message)
 	out := style.Render(message)
 	if hasNote && note != "" {
-		if room := width - used - 2; room > 0 {
-			note = "  " + truncate(note, room)
+		if room := width - used - 3; room > 0 {
+			note = " · " + truncate(note, room)
 			out += metaStyle.Render(note)
 			used += lipgloss.Width(note)
 		}

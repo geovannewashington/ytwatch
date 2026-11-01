@@ -1016,3 +1016,10 @@ func TestSanitizeDropsCombiningMarks(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusNoteIsSeparatedByADot(t *testing.T) {
+	got := renderStatus("Saved"+noteMark+"/tmp/a.mp4", statusStyle, 40)
+	if !strings.Contains(got, "Saved") || !strings.Contains(got, " · /tmp/a.mp4") {
+		t.Errorf("the note should follow a dot, got %q", got)
+	}
+}
