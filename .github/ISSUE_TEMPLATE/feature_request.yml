@@ -1,0 +1,19 @@
+name: Feature request
+description: An idea to make ytwatch better
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ytwatch is for finding a video, watching it, and leaving. There is no home
+        page, no recommendations, no account and no comments, and that is on purpose.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem do you want to solve?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like ytwatch to do?

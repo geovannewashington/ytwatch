@@ -4,6 +4,8 @@
 
 Search YouTube from your terminal. Watch on purpose.
 
+[![CI](https://github.com/geovannewashington/ytwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/geovannewashington/ytwatch/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/geovannewashington/ytwatch)](https://github.com/geovannewashington/ytwatch/releases/latest)
 [![Go](https://img.shields.io/badge/go-1.23+-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-linux-lightgrey)](#install)
@@ -53,19 +55,56 @@ It also stays light: [yt-dlp](https://github.com/yt-dlp/yt-dlp) searches,
 
 ## Install
 
-Requires Go 1.23+, `yt-dlp`, `mpv`, `ffmpeg`, `ueberzugpp`, a web browser,
-`wl-clipboard` (Wayland) or `xclip` / `xsel` (X11), and `wmctrl` (X11 window
-managers other than i3). On Arch Linux:
+ytwatch is for Linux, on Wayland or X11, on x86-64 or ARM64. Other systems are
+untested.
+
+**One command:**
 
 ```sh
-sudo pacman -S go yt-dlp mpv ffmpeg ueberzugpp wl-clipboard
-git clone https://github.com/geovannewashington/ytwatch.git
-cd ytwatch && make install    # copies ytwatch to ~/.local/bin
+curl -fsSL https://github.com/geovannewashington/ytwatch/releases/latest/download/install.sh | sh
 ```
 
-Keep `yt-dlp` up to date, because YouTube changes often. On Debian and Ubuntu the
-packaged version is too old: use `pipx install yt-dlp`. Run `ytwatch doctor` to
-check what is installed and what your session supports.
+It downloads the latest release, checks its SHA-256 checksum, puts `ytwatch` in
+`~/.local/bin`, and shows the command that installs the programs ytwatch needs.
+It asks before running that command, and uses `sudo` only if you say yes. The
+script is short, so you can [read it first](install.sh). Options: `--yes` runs
+the install command without asking, `--no-deps` installs only ytwatch, and
+`VERSION=v0.1.0` picks a release.
+
+**Other ways**
+
+- **With Go 1.23+:** `go install github.com/geovannewashington/ytwatch/cmd/ytwatch@latest`
+  (installs to `~/go/bin`).
+- **By hand:** download the `.tar.gz` for your system and `checksums.txt` from the
+  [releases page](https://github.com/geovannewashington/ytwatch/releases), check
+  it with `sha256sum -c --ignore-missing checksums.txt`, and move `ytwatch` to a
+  folder in your `PATH`.
+- **From source:** `git clone https://github.com/geovannewashington/ytwatch.git`,
+  then `cd ytwatch && make install` (needs Go 1.23+; installs to `~/.local/bin`).
+
+### Programs ytwatch needs
+
+All of these are required. Run `ytwatch doctor` to check them: it also prints the
+command that installs what is missing.
+
+| Program | Used for |
+|---|---|
+| `yt-dlp` | searching and downloading. Keep it up to date, because YouTube changes often |
+| `mpv` | playing |
+| `ffmpeg` | merging video and audio in downloads. Without it you get two separate files |
+| `ueberzugpp` | thumbnails |
+| a web browser | links and the live chat |
+| `wl-clipboard` (Wayland) or `xclip` / `xsel` (X11) | copying links |
+| `wmctrl` | moving windows to a workspace on X11 (not needed on i3) |
+
+On Arch Linux:
+
+```sh
+sudo pacman -S yt-dlp mpv ffmpeg ueberzugpp wl-clipboard
+```
+
+On Debian and Ubuntu the packaged `yt-dlp` is too old for YouTube: use
+`pipx install yt-dlp`.
 
 ## Usage
 
@@ -153,6 +192,17 @@ niri, `3` or `name:video` for Hyprland, `^2` for bspwm, a number from 1 for
 Other files: search history in `~/.local/state/ytwatch/history`, thumbnails in
 `~/.cache/ytwatch/thumbnails`.
 
+## Privacy
+
+ytwatch has no account, no telemetry and no analytics. It talks to YouTube's
+servers (`youtube.com` and `i.ytimg.com` for searches and thumbnails, and
+`googlevideo.com` for the video itself), directly and through `yt-dlp` and
+`mpv`, and to nobody else. On your disk it keeps a history of your searches (30
+days) and a cache of thumbnails (7 days), and deletes them when they expire.
+You can turn the history off in `config.toml`, and thumbnails with
+`[preview] output = "off"`. See [Cookies](#cookies) for the one setting that
+reads browser data.
+
 ## Cookies
 
 YouTube increasingly treats anonymous `yt-dlp` requests as bots. Sooner or later
@@ -185,4 +235,4 @@ tries to avoid. Use a browser profile with a separate or throwaway account.
 
 ## License
 
-[MIT](LICENSE). Contributions: `make test`, `make vet` and `make fmt`.
+[MIT](LICENSE). Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
