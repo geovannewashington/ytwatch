@@ -54,7 +54,7 @@ func TestDoctorReportsMissingRequiredPrograms(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
 	}
-	for _, want := range []string{"missing", "yt-dlp", "pipx install yt-dlp", "mpv", "ffmpeg", "ueberzugpp", "4 required programs missing", "console or SSH"} {
+	for _, want := range []string{"missing", "yt-dlp", "pipx install yt-dlp", "mpv", "ffmpeg", "ueberzugpp", "3 required programs missing", "console or SSH"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("report is missing %q:\n%s", want, text)
 		}
@@ -100,29 +100,73 @@ func TestDoctorTreatsEveryProgramAsRequired(t *testing.T) {
 		t.Errorf("a missing program must fail the doctor, exit code %d", code)
 	}
 
-	for _, name := range []string{"ffmpeg", "ueberzugpp", "browser", "clipboard", "wmctrl"} {
+	for _, name := range []string{"ffmpeg", "browser", "clipboard", "wmctrl"} {
 		if !strings.Contains(text, "missing  "+name) {
 			t.Errorf("%s should be reported as missing:\n%s", name, text)
 		}
 	}
 
-	if !strings.Contains(text, "5 required programs missing") {
+	if !strings.Contains(text, "4 required programs missing") {
 		t.Errorf("the summary should count all of them:\n%s", text)
 	}
-	if strings.Contains(text, "Optional") || strings.Contains(text, "Recommended") {
-		t.Errorf("there are no lesser tiers:\n%s", text)
+	if strings.Contains(text, "missing  ueberzugpp") {
+		t.Errorf("ueberzugpp is optional:\n%s", text)
 	}
 }
 
-func TestDoctorDoesNotNeedUeberzugppWhenThumbnailsAreOff(t *testing.T) {
-	cfg := config.Default()
-	cfg.Preview.Output = "off"
+func TestDoctorDoesNotNeedUeberzugpp(t *testing.T) {
+	var out bytes.Buffer
+	code := runDoctor(&out, config.Default(), fakeProbe(map[string]string{"WAYLAND_DISPLAY": "w"}, "yt-dlp", "mpv", "ffmpeg"))
+	text := out.String()
+
+	if code != 0 || !strings.Contains(text, "half-blocks") || !strings.Contains(text, "none") {
+		t.Errorf("without ueberzugpp thumbnails are half-blocks, exit code %d:\n%s", code, text)
+	}
+}
+
+func TestDoctorReportsKittyAndTmuxPassthrough(t *testing.T) {
+	env := map[string]string{"KITTY_WINDOW_ID": "1", "TMUX": "/tmp/tmux-1000/default,1,0"}
+	p := fakeProbe(env, "yt-dlp", "mpv", "ffmpeg")
+	p.kittyDetected = func() bool { return true }
+	p.tmuxPassthrough = func() string { return "off" }
 
 	var out bytes.Buffer
-	code := runDoctor(&out, cfg, fakeProbe(map[string]string{"WAYLAND_DISPLAY": "w"}, "yt-dlp", "mpv", "ffmpeg"))
+	runDoctor(&out, config.Default(), p)
+	for _, want := range []string{"kitty graphics", "allow-passthrough"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("report is missing %q:\n%s", want, out.String())
+		}
+	}
 
-	if code != 0 || !strings.Contains(out.String(), "not needed: thumbnails are off") {
-		t.Errorf("ueberzugpp is not needed with thumbnails off, exit code %d:\n%s", code, out.String())
+	for _, value := range []string{"on", "all"} {
+		p.tmuxPassthrough = func() string { return value }
+		out.Reset()
+		runDoctor(&out, config.Default(), p)
+		if strings.Contains(out.String(), "allow-passthrough") {
+			t.Errorf("no warning is needed when it is %s:\n%s", value, out.String())
+		}
+	}
+}
+
+func TestDoctorExplicitKittyNeedsNoDetection(t *testing.T) {
+	cfg := config.Default()
+	cfg.Preview.Output = "kitty"
+
+	var out bytes.Buffer
+	runDoctor(&out, cfg, fakeProbe(nil, "yt-dlp", "mpv", "ffmpeg"))
+	if !strings.Contains(out.String(), "kitty graphics · set in config.toml") {
+		t.Errorf("report should say kitty was set:\n%s", out.String())
+	}
+}
+
+func TestDoctorUeberzugppSetButMissing(t *testing.T) {
+	cfg := config.Default()
+	cfg.Preview.Output = "ueberzugpp"
+
+	var out bytes.Buffer
+	runDoctor(&out, cfg, fakeProbe(nil, "yt-dlp", "mpv", "ffmpeg"))
+	if !strings.Contains(out.String(), "ueberzugpp is not installed · no thumbnails") {
+		t.Errorf("report should say there are no thumbnails:\n%s", out.String())
 	}
 }
 

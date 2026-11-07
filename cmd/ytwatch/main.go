@@ -59,14 +59,14 @@ func main() {
 
 		// install.sh asks for just the command that installs what is missing.
 		if installOnly {
-			if command := installCommand(cfg, systemProbe()); command != "" {
+			if command := installCommand(cfg, systemProbe(cfg)); command != "" {
 				fmt.Println(command)
 			}
 
 			return
 		}
 
-		os.Exit(runDoctor(os.Stdout, cfg, systemProbe()))
+		os.Exit(runDoctor(os.Stdout, cfg, systemProbe(cfg)))
 	}
 
 	if len(args) > 0 && args[0] == "-s" {
@@ -95,9 +95,18 @@ func main() {
 		time.Now(),
 	)
 
+	// The terminal is asked before Bubble Tea starts reading its input.
+	detected := preview.WantsKittyQuery(cfg.Preview.Output, os.Getenv) &&
+		preview.QueryKitty(os.Stdin, os.Stdout, os.Getenv("TMUX") != "")
+
+	// The program and the kitty images share one locked writer, so an image
+	// never lands in the middle of a frame.
+	terminal := preview.NewSyncWriter(os.Stdout)
+
 	model := tui.New(query)
+	model.SetKitty(preview.NewKitty(terminal, os.Getenv("TMUX") != ""), detected)
 	model.SetConfig(cfg)
-	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithReportFocus())
+	program := tea.NewProgram(model, tea.WithOutput(terminal), tea.WithAltScreen(), tea.WithReportFocus())
 	model.Attach(program.Send)
 
 	if _, err := program.Run(); err != nil {

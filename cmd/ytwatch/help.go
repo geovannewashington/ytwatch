@@ -43,13 +43,11 @@ type helpSection struct {
 }
 
 // requirements are the programs ytwatch needs. All of them are required:
-// without ffmpeg a video download is saved as two files that are not merged,
-// and without ueberzugpp there are no thumbnails.
+// without ffmpeg a video download is saved as two files that are not merged.
 var requirements = []helpRow{
 	{"yt-dlp", "finds the videos and downloads them"},
 	{"mpv", "plays them"},
 	{"ffmpeg", "merges video and audio in downloads"},
-	{"ueberzugpp", "shows the thumbnails"},
 	{"a web browser", "opens links and the live chat"},
 	{"wl-clipboard (Wayland)", "copies links (on X11: xclip or xsel)"},
 	{"wmctrl (X11, not i3)", "moves the mpv and chat windows to a workspace"},
@@ -71,6 +69,9 @@ func usageText(version string, r *lipgloss.Renderer, t theme.Theme) string {
 			{"ytwatch live coding Go", ""},
 		}},
 		{"REQUIRES", requirements},
+		{"OPTIONAL", []helpRow{
+			{"ueberzugpp", "sharper thumbnails outside kitty and Ghostty"},
+		}},
 		{"CONFIG", []helpRow{
 			{"~/.config/ytwatch/config.toml", ""},
 			{"", "theme, workspaces, mpv args, download folder, link handlers, thumbnails"},

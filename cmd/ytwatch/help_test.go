@@ -10,7 +10,7 @@ import (
 	"github.com/geovannewashington/ytwatch/internal/theme"
 )
 
-func TestHelpPageListsEveryRequirementAndNoOptionalTier(t *testing.T) {
+func TestHelpPageListsEveryRequirementAndTheOptionalProgram(t *testing.T) {
 	// A renderer on a writer that is not a terminal gives plain text.
 	plain := lipgloss.NewRenderer(io.Discard)
 	nord, _ := theme.Lookup("nord")
@@ -18,7 +18,7 @@ func TestHelpPageListsEveryRequirementAndNoOptionalTier(t *testing.T) {
 	text := usageText("0.1.0", plain, nord)
 
 	for _, want := range []string{
-		"ytwatch 0.1.0", "USAGE", "EXAMPLES", "REQUIRES", "CONFIG",
+		"ytwatch 0.1.0", "USAGE", "EXAMPLES", "REQUIRES", "OPTIONAL", "CONFIG",
 		"yt-dlp", "mpv", "ffmpeg", "ueberzugpp", "a web browser", "wl-clipboard", "wmctrl",
 		"ytwatch doctor", "press ? for the keyboard help",
 	} {
@@ -27,8 +27,8 @@ func TestHelpPageListsEveryRequirementAndNoOptionalTier(t *testing.T) {
 		}
 	}
 
-	if strings.Contains(text, "Optional") || strings.Contains(text, "Recommended") {
-		t.Errorf("every program is required:\n%s", text)
+	if strings.Contains(text, "Recommended") {
+		t.Errorf("there is no recommended tier:\n%s", text)
 	}
 
 	if strings.Contains(text, "\x1b") {

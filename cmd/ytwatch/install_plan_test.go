@@ -75,12 +75,12 @@ func TestDoctorShowsTheInstallCommandOnlyWhenSomethingIsMissing(t *testing.T) {
 	var out bytes.Buffer
 	code := runDoctor(&out, config.Default(), fakeProbe(nil, "pacman", "yt-dlp", "mpv"))
 
-	if code != 1 || !strings.Contains(out.String(), "sudo pacman -S --needed ffmpeg ueberzugpp") {
+	if code != 1 || !strings.Contains(out.String(), "sudo pacman -S --needed ffmpeg") {
 		t.Errorf("the report should end with the install command, exit code %d:\n%s", code, out.String())
 	}
 
 	out.Reset()
-	code = runDoctor(&out, config.Default(), fakeProbe(nil, "yt-dlp", "mpv", "ffmpeg", "ueberzugpp"))
+	code = runDoctor(&out, config.Default(), fakeProbe(nil, "yt-dlp", "mpv", "ffmpeg"))
 
 	if code != 0 || strings.Contains(out.String(), "Install what is missing") {
 		t.Errorf("nothing is missing, exit code %d:\n%s", code, out.String())
@@ -89,11 +89,11 @@ func TestDoctorShowsTheInstallCommandOnlyWhenSomethingIsMissing(t *testing.T) {
 
 func TestInstallCommandPrintsNothingElseAndNothingWhenComplete(t *testing.T) {
 	got := installCommand(config.Default(), fakeProbe(nil, "pacman", "yt-dlp"))
-	if got != "sudo pacman -S --needed mpv ffmpeg ueberzugpp" {
+	if got != "sudo pacman -S --needed mpv ffmpeg" {
 		t.Errorf("installCommand = %q", got)
 	}
 
-	got = installCommand(config.Default(), fakeProbe(nil, "yt-dlp", "mpv", "ffmpeg", "ueberzugpp"))
+	got = installCommand(config.Default(), fakeProbe(nil, "yt-dlp", "mpv", "ffmpeg"))
 	if got != "" {
 		t.Errorf("nothing is missing, got %q", got)
 	}

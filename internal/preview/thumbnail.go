@@ -240,7 +240,6 @@ func fetchImage(ctx context.Context, thumbURL string) ([]byte, error) {
 
 type Overlay struct {
 	output string // ueberzugpp --output value; empty lets ueberzugpp choose
-	off    bool   // thumbnails are switched off in the config
 
 	mu     sync.Mutex
 	cmd    *exec.Cmd
@@ -266,16 +265,8 @@ type placement struct {
 // Requests in between are dropped; the newest one is always sent.
 const addGap = 150 * time.Millisecond
 
-// Configure applies the [preview] output setting: "auto", "off", or an
-// ueberzugpp output such as "x11".
-func (o *Overlay) Configure(setting string) {
-	var enabled bool
-	o.output, enabled = ResolveOutput(setting, os.Getenv)
-	o.off = !enabled
-}
-
-// Disabled reports whether thumbnails are switched off in the config.
-func (o *Overlay) Disabled() bool { return o.off }
+// Configure sets the ueberzugpp --output value, see Output.Ueberzug.
+func (o *Overlay) Configure(output string) { o.output = output }
 
 func Available() bool {
 	_, err := exec.LookPath("ueberzugpp")
