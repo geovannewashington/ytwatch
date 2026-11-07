@@ -39,8 +39,19 @@ const (
 	emptyPage = 5 * time.Second
 
 	retryAfter = 5 * time.Second
-	maxKept    = 4000
-	keepAfter  = 2500
+
+	// startupGrace is how long mpv may take to open its socket. The session
+	// starts right after mpv does, and a socket that is not there yet looks
+	// the same as one that is gone.
+	startupGrace = 30 * time.Second
+
+	// failGrace is how long the socket may fail, without a single answer,
+	// before mpv counts as gone. One slow or failed poll is not the end: mpv
+	// is busy for moments while it opens the stream. ytwatch also tells the
+	// session when it sees mpv exit (see End), which does not wait.
+	failGrace = 10 * time.Second
+	maxKept   = 4000
+	keepAfter = 2500
 )
 
 // end is "to the end of the chat": there is no page after the last one.
@@ -74,9 +85,11 @@ type Session struct {
 	retryAt  time.Time
 	err      string
 
-	pos     time.Duration
-	havePos bool
-	ended   bool // mpv is gone
+	pos       time.Duration
+	havePos   bool
+	connected bool      // mpv answered at least once
+	failing   time.Time // since when every poll fails, or the zero time
+	ended     bool      // mpv is gone
 }
 
 // NewSession returns a Session. Run it with Run.
@@ -138,12 +151,27 @@ func (s *Session) step(ctx context.Context) {
 
 	switch {
 	case errors.Is(err, player.ErrNoPlaybackTime):
+		s.connected, s.failing = true, time.Time{}
 		return // mpv is still opening the stream
 	case err != nil:
-		s.ended = true
+		now := s.opts.Now()
+		if s.failing.IsZero() {
+			s.failing = now
+		}
+
+		// Before mpv has answered, a missing socket only means that mpv is
+		// still starting.
+		grace := failGrace
+		if !s.connected {
+			grace = startupGrace
+		}
+		if now.Sub(s.failing) >= grace {
+			s.ended = true
+		}
+
 		return
 	}
-	s.pos, s.havePos = pos, true
+	s.pos, s.havePos, s.connected, s.failing = pos, true, true, time.Time{}
 
 	var token string
 	var offset time.Duration
@@ -250,6 +278,15 @@ func (s *Session) accept(page youtube.ChatPage, err error, afterSeek bool) {
 		s.from = s.messages[drop].Offset
 		s.messages = slices.Clone(s.messages[drop:])
 	}
+}
+
+// End tells the session that mpv is gone, for a caller that knows it before the
+// socket does.
+func (s *Session) End() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.ended = true
 }
 
 // Ended reports whether mpv is gone.

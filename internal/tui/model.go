@@ -16,6 +16,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/geovannewashington/ytwatch/internal/chat"
 	"github.com/geovannewashington/ytwatch/internal/clipboard"
 	"github.com/geovannewashington/ytwatch/internal/config"
 	"github.com/geovannewashington/ytwatch/internal/download"
@@ -167,8 +168,9 @@ type Model struct {
 	historyPos   int    // index in the history while browsing it with Up/Down
 	historyDraft string // what was typed before browsing
 	showHelp     bool
-	sockets      map[string]string // mpv control sockets of the past streams that play, by video id
-	animations   int               // animOff, animMinimal or animFull, see fx.go
+	sockets      map[string]string        // mpv control sockets of the past streams that play, by video id
+	chats        map[string]*chat.Session // the chat replays that follow them, by video id
+	animations   int                      // animOff, animMinimal or animFull, see fx.go
 	fx           fxState
 	clock        func() time.Time // replaces time.Now in tests
 	margin       int              // empty columns left of the layout when the terminal is wider than maxWidth
@@ -276,6 +278,7 @@ func New(initialQuery string) *Model {
 		downloading:    make(map[string]string),
 		chatOpened:     make(map[string]bool),
 		sockets:        make(map[string]string),
+		chats:          make(map[string]*chat.Session),
 		overlay:        &preview.Overlay{},
 		output:         preview.Output{Mode: preview.ModeUeberzug}, // until SetConfig
 		hideOnBlur:     os.Getenv("TMUX") != "",
@@ -753,6 +756,13 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			delete(m.playing, id)
 			delete(m.sockets, id)
 			delete(m.chatOpened, id)
+
+			// The chat page is told now, instead of finding out later from
+			// the socket.
+			if session := m.chats[id]; session != nil {
+				session.End()
+				delete(m.chats, id)
+			}
 		}
 
 		if player.IsForbidden(msg.err) && !msg.opts.WebSafari {

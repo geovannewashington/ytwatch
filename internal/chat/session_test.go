@@ -214,8 +214,16 @@ func TestSessionReportsWhatItWaitsFor(t *testing.T) {
 	f.err = errors.New("connection refused")
 	f.mu.Unlock()
 	f.step(0)
+	if f.Ended() {
+		t.Fatal("one failed poll is not the end")
+	}
+
+	f.mu.Lock()
+	f.now = f.now.Add(failGrace + time.Second)
+	f.mu.Unlock()
+	f.step(0)
 	if got := f.Snapshot(5); !f.Ended() || !got.Ended || got.Status != "Playback ended" {
-		t.Errorf("a missing socket ends the chat: %+v", got)
+		t.Errorf("a socket that keeps failing ends the chat: %+v", got)
 	}
 }
 
@@ -273,9 +281,114 @@ func TestRunStopsWhenTheContextEndsOrMpvIsGone(t *testing.T) {
 	g.Session.opts.Every = time.Millisecond
 	done = make(chan struct{})
 	go func() { g.Run(context.Background()); close(done) }()
+
+	time.Sleep(20 * time.Millisecond)
+	g.mu.Lock()
+	g.now = g.now.Add(2 * startupGrace) // mpv had its time to start
+	g.mu.Unlock()
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run must stop when mpv is gone")
+	}
+}
+
+func TestSessionWaitsForMpvToOpenItsSocket(t *testing.T) {
+	f := newFake(t)
+	f.err = errors.New("connect: no such file or directory") // mpv is still starting
+
+	for range 5 {
+		f.step(0)
+	}
+	if f.Ended() {
+		t.Fatal("a socket that is not there yet is not the end of the playback")
+	}
+	if got := f.Snapshot(5).Status; got != "Waiting for the video to start..." {
+		t.Errorf("status = %q", got)
+	}
+
+	f.mu.Lock()
+	f.err = nil
+	f.pos = 10 * time.Second
+	f.mu.Unlock()
+	f.step(10 * time.Second)
+	if f.Ended() || f.Snapshot(5).Ended {
+		t.Fatal("mpv is there now")
+	}
+
+	// Once mpv has answered, a socket that stays lost is the end.
+	f.mu.Lock()
+	f.err = errors.New("connection refused")
+	f.mu.Unlock()
+	f.step(10 * time.Second)
+	if f.Ended() {
+		t.Fatal("one failed poll is not the end")
+	}
+
+	f.mu.Lock()
+	f.now = f.now.Add(failGrace + time.Second)
+	f.mu.Unlock()
+	f.step(10 * time.Second)
+	if !f.Ended() {
+		t.Error("a socket that was there and stays gone means mpv ended")
+	}
+}
+
+func TestSessionSurvivesAFailedPollWhileMpvIsBusy(t *testing.T) {
+	f := newFake(t)
+	f.step(100 * time.Second) // mpv answers
+
+	for range 3 { // then it does not, for a moment: it opens the stream
+		f.mu.Lock()
+		f.err = errors.New("read unix: i/o timeout")
+		f.now = f.now.Add(2 * time.Second)
+		f.mu.Unlock()
+		f.step(100 * time.Second)
+	}
+	if f.Ended() {
+		t.Fatal("a few seconds of silence is not the end")
+	}
+
+	f.mu.Lock()
+	f.err = nil
+	f.now = f.now.Add(time.Hour) // a long time later, but mpv answered in between
+	f.mu.Unlock()
+	f.step(101 * time.Second)
+
+	f.mu.Lock()
+	f.err = errors.New("read unix: i/o timeout")
+	f.now = f.now.Add(2 * time.Second)
+	f.mu.Unlock()
+	f.step(101 * time.Second)
+	if f.Ended() {
+		t.Error("an answer starts the count again")
+	}
+}
+
+func TestSessionEndsAtOnceWhenToldSo(t *testing.T) {
+	f := newFake(t)
+	f.step(100 * time.Second)
+
+	f.End()
+	if got := f.Snapshot(5); !f.Ended() || got.Status != "Playback ended" {
+		t.Errorf("End must not wait for the socket: %+v", got)
+	}
+}
+
+func TestSessionGivesUpWhenMpvNeverOpensItsSocket(t *testing.T) {
+	f := newFake(t)
+	f.err = errors.New("connect: no such file or directory")
+
+	f.step(0)
+	if f.Ended() {
+		t.Fatal("too early to give up")
+	}
+
+	f.mu.Lock()
+	f.now = f.now.Add(startupGrace + time.Second)
+	f.mu.Unlock()
+	f.step(0)
+	if !f.Ended() {
+		t.Error("mpv that never starts must end the chat, or the page waits for ever")
 	}
 }

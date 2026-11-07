@@ -37,7 +37,7 @@ func TestOpenChatReplayOpensALocalPageInTheChatWindow(t *testing.T) {
 	m := New("test")
 	m.cfg.Chat.Enabled = true
 
-	socket := filepath.Join(t.TempDir(), "gone.sock") // mpv is not there: the page says so
+	socket := filepath.Join(t.TempDir(), "starting.sock") // mpv has not opened its socket yet
 	if err := m.openChatReplay(vodWithChat(), socket); err != nil {
 		t.Fatal(err)
 	}
@@ -45,22 +45,29 @@ func TestOpenChatReplayOpensALocalPageInTheChatWindow(t *testing.T) {
 		t.Fatalf("urls = %v, opened = %v", *urls, m.chatOpened)
 	}
 
-	// The window gets a page, and mpv being gone is told to it.
-	var body string
-	for range 50 {
+	messages := func() string {
 		response, err := http.Get((*urls)[0] + "messages")
 		if err != nil {
 			t.Fatal(err)
 		}
+		defer response.Body.Close()
 		data, _ := io.ReadAll(response.Body)
-		response.Body.Close()
-		if body = string(data); strings.Contains(body, "Playback ended") {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
+
+		return string(data)
 	}
-	if !strings.Contains(body, "Playback ended") || !strings.Contains(body, "A VOD") {
+
+	// The window gets a page, which waits for mpv instead of giving up.
+	if body := messages(); !strings.Contains(body, "Waiting for the video to start") || !strings.Contains(body, "A VOD") {
 		t.Errorf("messages = %s", body)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if strings.Contains(messages(), "Playback ended") {
+		t.Error("a socket that is not there yet is not the end of the playback")
+	}
+
+	m.chats["abcdefghijk"].End()
+	if body := messages(); !strings.Contains(body, "Playback ended") {
+		t.Errorf("after End: %s", body)
 	}
 
 	// Opening again for the same playback must not open a second window.
@@ -118,14 +125,28 @@ func TestOpenChatReplayStopsTheServerWhenTheWindowFails(t *testing.T) {
 	}
 }
 
-func TestPlayerExitForgetsTheSocketAndAllowsTheChatAgain(t *testing.T) {
+func TestPlayerExitEndsTheChatAndAllowsANewOne(t *testing.T) {
+	fakeChatWindow(t)
 	m := New("test")
+	m.cfg.Chat.Enabled = true
 	m.playing["abcdefghijk"] = "A VOD"
-	m.sockets["abcdefghijk"] = "/tmp/x.sock"
-	m.chatOpened["abcdefghijk"] = true
+	m.sockets["abcdefghijk"] = filepath.Join(t.TempDir(), "x.sock")
+
+	if err := m.openChatReplay(vodWithChat(), m.sockets["abcdefghijk"]); err != nil {
+		t.Fatal(err)
+	}
+	session := m.chats["abcdefghijk"]
+	if session == nil || session.Ended() {
+		t.Fatal("the chat must be running")
+	}
 
 	m.Update(playerExitedMsg{ids: []string{"abcdefghijk"}})
-	if m.sockets["abcdefghijk"] != "" || m.chatOpened["abcdefghijk"] {
+	if m.sockets["abcdefghijk"] != "" || m.chatOpened["abcdefghijk"] || m.chats["abcdefghijk"] != nil {
 		t.Error("a new playback of the same video needs a new socket and a new chat window")
 	}
+	if !session.Ended() {
+		t.Error("the page must be told that mpv is gone, without waiting for the socket")
+	}
+
+	m.cancel()
 }

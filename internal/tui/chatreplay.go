@@ -36,6 +36,8 @@ func (m *Model) openChatReplay(v media.Video, socket string) error {
 		return err
 	}
 
+	m.chats[v.ID] = session
+
 	ctx := m.ctx
 	go func() {
 		session.Run(ctx)
