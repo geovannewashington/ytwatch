@@ -1,7 +1,11 @@
 package tui
 
 import (
+	"bytes"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,6 +17,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/geovannewashington/ytwatch/internal/config"
 	"github.com/geovannewashington/ytwatch/internal/history"
@@ -1346,5 +1351,154 @@ func TestSearchLineCannotInjectTerminalCodes(t *testing.T) {
 
 	if got := stripControls("a\tb\nc"); got != "a b c" {
 		t.Errorf("tabs and line breaks become spaces, got %q", got)
+	}
+}
+
+// nativeModel is a model with two results, a PNG thumbnail for the first, and
+// the given native mode.
+func nativeModel(t *testing.T, mode preview.Mode, kitty *preview.Kitty) (*Model, string) {
+	t.Helper()
+
+	img := image.NewRGBA(image.Rect(0, 0, 64, 36))
+	for y := range 36 {
+		for x := range 64 {
+			img.Set(x, y, color.RGBA{200, uint8(4 * y), 30, 255})
+		}
+	}
+
+	path := filepath.Join(t.TempDir(), "thumb.png")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(file, img); err != nil {
+		t.Fatal(err)
+	}
+	file.Close()
+
+	m := prefetchModel(2, 0)
+	m.output = preview.Output{Mode: mode}
+	m.kitty = kitty
+	m.thumbnailPaths["vid00000"] = path
+
+	return m, path
+}
+
+func previewWidth(m *Model) int {
+	_, width := m.paneWidths()
+	return width
+}
+
+func TestHalfBlockThumbnailFillsTheReservedRows(t *testing.T) {
+	previous := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(previous)
+
+	m, _ := nativeModel(t, preview.ModeHalfBlocks, nil)
+	if !m.thumbnailsOn() {
+		t.Fatal("half-blocks need no program")
+	}
+
+	m.showSelectedThumbnail()
+	out := m.renderPreview(previewWidth(m), 30)
+
+	if !strings.Contains(out, "▀") || strings.Contains(out, "install ueberzugpp") {
+		t.Errorf("the preview should hold half-blocks and no install note:\n%s", out)
+	}
+
+	// The reserved rows keep the text below at the same place with or without
+	// the image.
+	lines := strings.Split(out, "\n")
+	m.selected = 1
+	other := strings.Split(m.renderPreview(previewWidth(m), 30), "\n")
+	if strings.Contains(strings.Join(other, "\n"), "▀") {
+		t.Error("another result must not show the first one's thumbnail")
+	}
+	if len(lines) < m.thumbRows()+1 || len(other) != len(lines) {
+		t.Errorf("the thumbnail rows are not reserved: %d and %d lines", len(lines), len(other))
+	}
+}
+
+func TestKittyThumbnailIsSentOnceOutsideView(t *testing.T) {
+	var sent bytes.Buffer
+	k := preview.NewKitty(&sent, false)
+
+	m, _ := nativeModel(t, preview.ModeKitty, k)
+	m.showSelectedThumbnail()
+	if !strings.Contains(sent.String(), "\x1b_Ga=T,U=1,f=100,t=d,i=42") {
+		t.Fatalf("the image should be sent when it is shown: %.60q", sent.String())
+	}
+
+	size := sent.Len()
+	out := m.renderPreview(previewWidth(m), 30)
+	m.showSelectedThumbnail()
+	m.renderPreview(previewWidth(m), 30)
+
+	if sent.Len() != size {
+		t.Error("drawing the preview or showing the same thumbnail again must not resend the image")
+	}
+	if !strings.Contains(out, "\U0010EEEE") {
+		t.Errorf("the preview should hold placeholders:\n%s", out)
+	}
+	for i, line := range strings.Split(out, "\n") {
+		if w := lipgloss.Width(line); w > previewWidth(m) {
+			t.Errorf("line %d is %d columns wide, the preview is %d", i, w, previewWidth(m))
+		}
+	}
+
+	m.Close()
+	if !strings.HasSuffix(sent.String(), "a=d,d=I,i=42,q=2\x1b\\") {
+		t.Error("closing the model should delete the image")
+	}
+}
+
+func TestNativeModesIgnoreBlurAndNeedNoSettling(t *testing.T) {
+	for _, mode := range []preview.Mode{preview.ModeKitty, preview.ModeHalfBlocks} {
+		m := New("")
+		m.output = preview.Output{Mode: mode}
+		m.hideOnBlur = true
+
+		m.Update(tea.BlurMsg{})
+		if m.blurred {
+			t.Errorf("mode %d: nothing is hidden on blur, the image is part of the screen", mode)
+		}
+		if cmd := m.settleThumbnail(); cmd != nil {
+			t.Errorf("mode %d: nothing needs to be redrawn after a layout change", mode)
+		}
+	}
+}
+
+func TestThumbnailsOffReservesNoRowsAndDrawsNothing(t *testing.T) {
+	m, _ := nativeModel(t, preview.ModeOff, nil)
+	m.showSelectedThumbnail()
+
+	if m.thumbnailsOn() || m.thumbRows() != 0 {
+		t.Error("off means no thumbnails and no reserved rows")
+	}
+	if strings.Contains(m.renderPreview(previewWidth(m), 30), "▀") {
+		t.Error("off draws nothing")
+	}
+}
+
+func TestSetConfigPicksTheRendererFromTheSetting(t *testing.T) {
+	m := New("")
+	cfg := config.Default()
+
+	cfg.Preview.Output = "halfblocks"
+	m.SetConfig(cfg)
+	if m.output.Mode != preview.ModeHalfBlocks {
+		t.Errorf("halfblocks: %+v", m.output)
+	}
+
+	cfg.Preview.Output = "kitty"
+	m.SetConfig(cfg)
+	if m.output.Mode != preview.ModeKitty {
+		t.Errorf("kitty: %+v", m.output)
+	}
+
+	cfg.Preview.Output = "off"
+	m.SetConfig(cfg)
+	if m.output.Mode != preview.ModeOff {
+		t.Errorf("off: %+v", m.output)
 	}
 }

@@ -211,6 +211,11 @@ type Model struct {
 	hideOnBlur bool
 	blurred    bool
 
+	output        preview.Output // how thumbnails are drawn, see SetConfig
+	kitty         *preview.Kitty // draws in ModeKitty; set by SetKitty
+	kittyDetected bool           // the terminal answered the kitty graphics query
+	native        nativeThumb    // the thumbnail lines of the native modes
+
 	countPrefix string
 	pendingG    bool
 
@@ -270,6 +275,7 @@ func New(initialQuery string) *Model {
 		downloading:    make(map[string]string),
 		chatOpened:     make(map[string]bool),
 		overlay:        &preview.Overlay{},
+		output:         preview.Output{Mode: preview.ModeUeberzug}, // until SetConfig
 		hideOnBlur:     os.Getenv("TMUX") != "",
 		cfg:            config.Default(),
 		width:          100, height: 30,
@@ -292,7 +298,9 @@ func (m *Model) SetConfig(cfg config.Config) {
 	m.audioOnly = cfg.General.AudioOnly
 	m.quality = quality.Normalize(cfg.General.Quality)
 	m.animations = animationLevel(cfg.UI.Animations)
-	m.overlay.Configure(cfg.Preview.Output)
+	m.output = preview.ResolveOutput(cfg.Preview.Output, os.Getenv, m.kittyDetected, preview.Available())
+	m.overlay.Configure(m.output.Ueberzug)
+	m.native = nativeThumb{}
 
 	m.history = nil
 	if cfg.History.Enabled {
@@ -306,6 +314,12 @@ func (m *Model) SetConfig(cfg config.Config) {
 		ApplyTheme(t)
 		m.themeName = t.Name
 	}
+}
+
+// SetKitty gives the model what it draws kitty thumbnails with, and whether the
+// terminal answered the graphics query. Call it before SetConfig.
+func (m *Model) SetKitty(k *preview.Kitty, detected bool) {
+	m.kitty, m.kittyDetected = k, detected
 }
 
 func (m *Model) Init() tea.Cmd {
@@ -334,6 +348,10 @@ func (m *Model) Close() {
 
 	if m.overlay != nil {
 		m.overlay.Close()
+	}
+
+	if m.kitty != nil {
+		m.kitty.Delete()
 	}
 }
 
@@ -563,7 +581,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.BlurMsg:
-		if m.hideOnBlur {
+		if m.hideOnBlur && m.output.Mode == preview.ModeUeberzug {
 			m.blurred = true
 			m.settleSeq++ // queued redraws must not bring the image back
 			m.overlay.Remove()
@@ -1742,6 +1760,10 @@ func (m *Model) backgroundContext() context.Context {
 func (m *Model) setThumbnail(id, path string) {
 	if _, had := m.thumbnailPaths[id]; had {
 		m.overlay.Invalidate()
+		m.native = nativeThumb{}
+		if m.kitty != nil {
+			m.kitty.Reset()
+		}
 	}
 
 	m.thumbnailPaths[id] = path
@@ -1866,15 +1888,15 @@ func (m *Model) paneWidths() (results, preview int) {
 }
 
 // thumbnailsOn reports whether thumbnails can be drawn: they are not switched
-// off in the config and ueberzugpp is installed.
+// off in the config, and ueberzugpp is installed if it draws them.
 func (m *Model) thumbnailsOn() bool {
-	return !m.overlay.Disabled() && preview.Available()
+	return m.output.Mode != preview.ModeOff && (m.output.Mode.Native() || preview.Available())
 }
 
 // thumbRows is the height reserved for the thumbnail. It is zero when
 // thumbnails are switched off, so the preview text uses the space.
 func (m *Model) thumbRows() int {
-	if m.overlay.Disabled() {
+	if m.output.Mode == preview.ModeOff {
 		return 0
 	}
 	return max(0, min(8, m.bodyHeight()-10))
@@ -1996,6 +2018,10 @@ func loadThumbnail(ctx context.Context, v media.Video, sequence int) tea.Cmd {
 // from a tmux hook that can run after our first redraw and nothing shows it
 // again; the second redraw covers a slow hook. Only the newest call counts.
 func (m *Model) settleThumbnail() tea.Cmd {
+	if m.output.Mode != preview.ModeUeberzug {
+		return nil
+	}
+
 	m.settleSeq++
 	seq := m.settleSeq
 
@@ -2009,6 +2035,9 @@ func (m *Model) settleThumbnail() tea.Cmd {
 // redrawThumbnail sends the image again, which makes ueberzugpp
 // read the position of the terminal again.
 func (m *Model) redrawThumbnail() {
+	if m.output.Mode != preview.ModeUeberzug {
+		return
+	}
 	if m.width < wideWidth || m.height < minHeight || m.showHelp || m.showFilters || m.showQuality {
 		return
 	}
@@ -2023,7 +2052,59 @@ func (m *Model) Attach(send func(tea.Msg)) {
 	player.OnWindowPlaced = func() { send(windowPlacedMsg{}) }
 }
 
+// nativeThumb is the thumbnail of the native modes, as lines for renderPreview.
+// It is valid for one image at one size.
+type nativeThumb struct {
+	path        string
+	width, rows int
+	lines       []string
+}
+
+// renderNative makes the lines of the selected thumbnail. In kitty mode this
+// also sends the image to the terminal, which View must not do: Bubble Tea
+// only rewrites the lines that changed.
+func (m *Model) renderNative() {
+	v, ok := m.selectedVideo()
+	if !ok || m.width < wideWidth || m.splitAnimating() {
+		return
+	}
+
+	path := m.thumbnailPaths[v.ID]
+	_, width, rows, _ := m.previewGeometry()
+	if path == "" || rows < 3 || width < 8 {
+		return
+	}
+
+	if n := m.native; n.path == path && n.width == width && n.rows == rows {
+		return
+	}
+
+	var lines []string
+	var err error
+
+	switch {
+	case m.output.Mode == preview.ModeKitty && m.kitty != nil:
+		lines, err = m.kitty.Render(path, width, rows)
+	case m.output.Mode == preview.ModeHalfBlocks:
+		lines, err = preview.HalfBlocks(path, width, rows)
+	default:
+		err = errors.New("no renderer")
+	}
+
+	if err != nil {
+		m.native = nativeThumb{}
+		return
+	}
+
+	m.native = nativeThumb{path, width, rows, lines}
+}
+
 func (m *Model) showSelectedThumbnail() {
+	if m.output.Mode.Native() {
+		m.renderNative()
+		return
+	}
+
 	if m.blurred || m.width < wideWidth || m.splitAnimating() {
 		m.overlay.Remove()
 		return
@@ -2653,11 +2734,20 @@ func (m *Model) renderPreview(width, height int) string {
 	v, ok := m.selectedVideo()
 	lines := []string{panelTitleStyle.Render("PREVIEW")}
 	thumbRows := m.thumbRows()
-	for i := 0; i < thumbRows; i++ {
-		lines = append(lines, "")
+	var thumb []string
+	if n := m.native; ok && n.path == m.thumbnailPaths[v.ID] && n.width == width && n.rows == thumbRows {
+		thumb = n.lines
 	}
 
-	if !preview.Available() && thumbRows > 0 {
+	for i := 0; i < thumbRows; i++ {
+		line := ""
+		if i < len(thumb) {
+			line = thumb[i]
+		}
+		lines = append(lines, line)
+	}
+
+	if m.output.Mode == preview.ModeUeberzug && !preview.Available() && thumbRows > 0 {
 		lines[1] = metaStyle.Render(truncate("No thumbnails · install ueberzugpp", width))
 	}
 

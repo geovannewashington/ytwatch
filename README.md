@@ -32,8 +32,10 @@ It also stays light: [yt-dlp](https://github.com/yt-dlp/yt-dlp) searches,
 - **One search for everything:** videos, Shorts, live streams and playlists,
   with filters for type, duration and date, and a language and region of
   your choice.
-- **Thumbnails** beside every result. They use `ueberzugpp`, which works the
-  same on Wayland, X11 and in terminals like Alacritty and foot that have no
+- **Thumbnails** beside every result. kitty and Ghostty get sharp images from
+  the kitty graphics protocol, and any other terminal gets coloured
+  half-blocks, with nothing to install. The optional `ueberzugpp` adds real
+  images on Wayland, X11 and in terminals like Alacritty and foot that have no
   image protocol of their own.
 - **Full live stream support.** Live streams are marked, and their chat opens
   next to the video. Past live streams are marked too, so you can tell a
@@ -94,7 +96,7 @@ command that installs what is missing.
 | `yt-dlp` | searching and downloading. Keep it up to date, because YouTube changes often |
 | `mpv` | playing |
 | `ffmpeg` | merging video and audio in downloads. Without it you get two separate files |
-| `ueberzugpp` | thumbnails |
+| `ueberzugpp` (optional) | sharp thumbnails outside kitty and Ghostty. Without it they are half-blocks |
 | a web browser | links and the live chat |
 | `wl-clipboard` (Wayland) or `xclip` / `xsel` (X11) | copying links |
 | `wmctrl` | moving windows to a workspace on X11 (not needed on i3) |
@@ -162,7 +164,8 @@ name = "everforest"           # catppuccin, gruvbox, nord, tokyonight, rose-pine
 # accent = "#a7c080"          # any color: accent, secondary, live, short, vod, muted, subtle, border, error
 
 [preview]
-output = "auto"               # auto, off, x11, wayland, sixel, kitty, iterm2, chafa
+output = "auto"               # auto, off, kitty, halfblocks, ueberzugpp, x11, wayland, sixel, iterm2, chafa
+# auto: kitty in kitty and Ghostty, else ueberzugpp if installed, else halfblocks
 
 [search]
 language = "en"               # a code such as en, pt-BR or ja; empty: YouTube decides
@@ -223,15 +226,21 @@ tries to avoid. Use a browser profile with a separate or throwaway account.
 
 - **Playback fails.** The status line shows why. Update `yt-dlp` and `mpv`, then
   see [Cookies](#cookies).
-- **No thumbnails.** Run `ytwatch doctor`. If your terminal runs under another
-  display server than your session (an X11 terminal in Wayland), set
-  `[preview] output` to `x11` or `wayland`.
-- **The thumbnail shows over other tmux windows or panes.** The image is a
-  separate desktop window, so tmux cannot hide it. ytwatch hides it when the
-  pane loses focus, but tmux only reports that with `set -g focus-events on`
-  in `tmux.conf`. `ytwatch doctor` checks it.
-- **The thumbnail is a tiled window on Hyprland.** Add a window rule, see
-  [docs/hyprland.md](docs/hyprland.md).
+- **Thumbnails are blocky.** They are half-blocks, which every terminal can
+  show. Install `ueberzugpp`, or use kitty or Ghostty. `ytwatch doctor` says
+  which one is in use and why.
+- **No thumbnails.** Run `ytwatch doctor`. With `ueberzugpp`, if your terminal
+  runs under another display server than your session (an X11 terminal in
+  Wayland), set `[preview] output` to `x11` or `wayland`.
+- **kitty thumbnails do not show in tmux.** Add `set -g allow-passthrough on`
+  to `tmux.conf`, and set `[preview] output = "kitty"`, because tmux hides the
+  answer that `auto` looks for. `ytwatch doctor` checks the option.
+- **With ueberzugpp, the thumbnail shows over other tmux windows or panes.**
+  The image is a separate desktop window, so tmux cannot hide it. ytwatch hides
+  it when the pane loses focus, but tmux only reports that with
+  `set -g focus-events on` in `tmux.conf`. `ytwatch doctor` checks it.
+- **With ueberzugpp, the thumbnail is a tiled window on Hyprland.** Add a window
+  rule, see [docs/hyprland.md](docs/hyprland.md).
 - **Results differ from youtube.com.** ytwatch is not logged in, and YouTube
   personalizes by account. Set `language` and `region` under `[search]`. The
   region is sent as a fake address, which YouTube may ignore.

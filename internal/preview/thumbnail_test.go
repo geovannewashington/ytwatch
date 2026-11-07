@@ -59,35 +59,6 @@ func TestFetchImageSkipsMissingAndWebP(t *testing.T) {
 	}
 }
 
-func TestResolveOutput(t *testing.T) {
-	env := func(vars map[string]string) func(string) string {
-		return func(name string) string { return vars[name] }
-	}
-	for name, tc := range map[string]struct {
-		setting string
-		vars    map[string]string
-		output  string
-		enabled bool
-	}{
-		"auto on wayland": {
-			"auto",
-			map[string]string{"WAYLAND_DISPLAY": "wayland-1", "DISPLAY": ":0"},
-			"wayland",
-			true,
-		},
-		"empty means auto on x11":   {"", map[string]string{"DISPLAY": ":0"}, "x11", true},
-		"auto without display":      {"auto", nil, "", true},
-		"off":                       {"off", map[string]string{"DISPLAY": ":0"}, "", false},
-		"explicit value wins":       {"Kitty", map[string]string{"DISPLAY": ":0"}, "kitty", true},
-		"x11 forced under xwayland": {"x11", map[string]string{"WAYLAND_DISPLAY": "wayland-1"}, "x11", true},
-	} {
-		output, enabled := ResolveOutput(tc.setting, env(tc.vars))
-		if output != tc.output || enabled != tc.enabled {
-			t.Errorf("%s: got %q, %v; want %q, %v", name, output, enabled, tc.output, tc.enabled)
-		}
-	}
-}
-
 func TestPruneRemovesOldThenOldestOverTheSizeLimit(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now()

@@ -27,9 +27,25 @@ type probe struct {
 	browser       func(config.Config) string
 	// tmuxFocusEvents is tmux's focus-events option: "on", "off" or "".
 	tmuxFocusEvents func() string
+	// tmuxPassthrough is tmux's allow-passthrough option: "on", "all", "off"
+	// or "".
+	tmuxPassthrough func() string
+	// kittyDetected asks the terminal whether it speaks the kitty graphics
+	// protocol, see preview.QueryKitty.
+	kittyDetected func() bool
 }
 
-func systemProbe() probe {
+func tmuxOption(name string) func() string {
+	return func() string {
+		out, err := exec.Command("tmux", "show", "-gv", name).Output()
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(out))
+	}
+}
+
+func systemProbe(cfg config.Config) probe {
 	return probe{
 		getenv:   os.Getenv,
 		lookPath: exec.LookPath,
@@ -41,15 +57,14 @@ func systemProbe() probe {
 			line, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
 			return line
 		},
-		windowManager: func() string { return wm.Name(wm.Detect()) },
-		clipboard:     clipboard.Tool,
-		browser:       player.DescribeBrowser,
-		tmuxFocusEvents: func() string {
-			out, err := exec.Command("tmux", "show", "-gv", "focus-events").Output()
-			if err != nil {
-				return ""
-			}
-			return strings.TrimSpace(string(out))
+		windowManager:   func() string { return wm.Name(wm.Detect()) },
+		clipboard:       clipboard.Tool,
+		browser:         player.DescribeBrowser,
+		tmuxFocusEvents: tmuxOption("focus-events"),
+		tmuxPassthrough: tmuxOption("allow-passthrough"),
+		kittyDetected: func() bool {
+			return preview.WantsKittyQuery(cfg.Preview.Output, os.Getenv) &&
+				preview.QueryKitty(os.Stdin, os.Stdout, os.Getenv("TMUX") != "")
 		},
 	}
 }
@@ -129,19 +144,32 @@ func diagnose(w io.Writer, cfg config.Config, p probe) doctorResult {
 		info(w, "window manager", "none supported · windows are not moved (sway, i3, Hyprland, niri, bspwm and X11 work)")
 	}
 
-	output, enabled := preview.ResolveOutput(cfg.Preview.Output, p.getenv)
-	if output == "" {
-		output = "chosen by ueberzugpp"
-	}
+	_, err := p.lookPath("ueberzugpp")
+	ueberzugpp := err == nil
+	detected := p.kittyDetected != nil && p.kittyDetected()
+	output := preview.ResolveOutput(cfg.Preview.Output, p.getenv, detected, ueberzugpp)
+	inTmux := p.getenv("TMUX") != ""
 
-	switch _, err := p.lookPath("ueberzugpp"); {
-	case !enabled:
+	switch output.Mode {
+	case preview.ModeOff:
 		info(w, "thumbnails", "off in config.toml")
-	case err != nil:
-		info(w, "thumbnails", "ueberzugpp not installed · no thumbnails (see the Required list)")
-	default:
-		info(w, "thumbnails", "ueberzugpp, output: "+output)
-		if p.getenv("TMUX") != "" && p.tmuxFocusEvents != nil && p.tmuxFocusEvents() != "on" {
+	case preview.ModeKitty:
+		info(w, "thumbnails", "kitty graphics · "+output.Reason)
+		if inTmux && p.tmuxPassthrough != nil {
+			if mode := p.tmuxPassthrough(); mode != "on" && mode != "all" {
+				info(w, "tmux", "allow-passthrough is off · thumbnails will not show · add: set -g allow-passthrough on")
+			}
+		}
+	case preview.ModeHalfBlocks:
+		info(w, "thumbnails", "half-blocks · "+output.Reason+" · ueberzugpp, kitty or Ghostty give sharper images")
+	case preview.ModeUeberzug:
+		if !ueberzugpp {
+			info(w, "thumbnails", "ueberzugpp is not installed · no thumbnails")
+			break
+		}
+
+		info(w, "thumbnails", "ueberzugpp, output: "+cmp.Or(output.Ueberzug, "chosen by ueberzugpp")+" · "+output.Reason)
+		if inTmux && p.tmuxFocusEvents != nil && p.tmuxFocusEvents() != "on" {
 			info(w, "tmux", "focus-events is off · thumbnails can stay on screen when you change window · add: set -g focus-events on")
 		}
 	}
@@ -157,8 +185,7 @@ func diagnose(w io.Writer, cfg config.Config, p probe) doctorResult {
 	}
 
 	// Everything here is required: without ffmpeg a video download is saved as
-	// two files that are not merged, and without ueberzugpp there are no
-	// thumbnails.
+	// two files that are not merged.
 	var missing []string
 	fmt.Fprintln(w, "\nRequired")
 
@@ -183,20 +210,6 @@ func diagnose(w io.Writer, cfg config.Config, p probe) doctorResult {
 		row(w, "ok", dep.name, p.version(dep.name, dep.flag))
 	}
 
-	if _, err := p.lookPath("ueberzugpp"); err == nil {
-		row(w, "ok", "ueberzugpp", p.version("ueberzugpp", "--version"))
-	} else if !enabled {
-		row(w, "ok", "ueberzugpp", "not needed: thumbnails are off in config.toml")
-	} else {
-		row(
-			w,
-			"missing",
-			"ueberzugpp",
-			"thumbnails · Arch: pacman -S ueberzugpp · Homebrew: brew install jstkdng/programs/ueberzugpp · other: github.com/jstkdng/ueberzugpp",
-		)
-		missing = append(missing, "ueberzugpp")
-	}
-
 	if name := p.browser(cfg); name != "" {
 		row(w, "ok", "browser", name+" (o opens links, live chat)")
 	} else {
@@ -219,6 +232,14 @@ func diagnose(w io.Writer, cfg config.Config, p probe) doctorResult {
 			row(w, "missing", "wmctrl", "workspace placement on X11 · install wmctrl with your package manager")
 			missing = append(missing, "wmctrl")
 		}
+	}
+
+	fmt.Fprintln(w, "\nOptional")
+
+	if ueberzugpp {
+		row(w, "ok", "ueberzugpp", p.version("ueberzugpp", "--version"))
+	} else {
+		row(w, "none", "ueberzugpp", "sharp thumbnails outside kitty and Ghostty · Arch: pacman -S ueberzugpp · Homebrew: brew install jstkdng/programs/ueberzugpp · other: github.com/jstkdng/ueberzugpp")
 	}
 
 	return doctorResult{missing: missing, wayland: server == "Wayland"}

@@ -172,7 +172,7 @@ func TestParsePreviewOutput(t *testing.T) {
 	if err != nil || cfg.Preview.Output != "x11" {
 		t.Fatalf("got %+v, %v", cfg.Preview, err)
 	}
-	for _, ok := range []string{"auto", "off", "wayland", "sixel", "kitty", "iterm2", "chafa"} {
+	for _, ok := range []string{"auto", "off", "wayland", "sixel", "kitty", "halfblocks", "ueberzugpp", "iterm2", "chafa"} {
 		if _, err := Parse("[preview]\noutput = \"" + ok + "\"\n"); err != nil {
 			t.Errorf("%s should be accepted: %v", ok, err)
 		}

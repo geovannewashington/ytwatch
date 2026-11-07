@@ -54,17 +54,21 @@ type LinkHandler struct {
 }
 
 // PreviewOutputs are the accepted values of [preview] output besides "auto"
-// and "off". They are the output methods of ueberzugpp.
-var PreviewOutputs = []string{"x11", "wayland", "sixel", "kitty", "iterm2", "chafa"}
+// and "off". kitty and halfblocks are drawn by ytwatch itself; ueberzugpp and
+// the rest are output methods of ueberzugpp.
+var PreviewOutputs = []string{"kitty", "halfblocks", "ueberzugpp", "x11", "wayland", "sixel", "iterm2", "chafa"}
 
-// Preview configures the thumbnail overlay.
+// Preview configures the thumbnails.
 type Preview struct {
-	// Output is how thumbnails are drawn by ueberzugpp. "auto" (the default)
-	// follows the session: wayland, x11, or a terminal protocol when there is
-	// no display server. "off" shows no thumbnails. Set x11 or wayland when the
-	// terminal runs under the other kind of server, for example an X11
-	// terminal inside a Wayland session. kitty, sixel, iterm2 and chafa draw
-	// inside the terminal and also work over SSH.
+	// Output is how thumbnails are drawn. "auto" (the default) uses kitty in
+	// kitty and Ghostty, else ueberzugpp if it is installed, else halfblocks.
+	// "off" shows no thumbnails. kitty (the kitty graphics protocol) and
+	// halfblocks (coloured characters, works in any terminal) need no other
+	// program. ueberzugpp uses ueberzugpp with a wayland or x11 layer chosen
+	// from the session; set x11 or wayland when the terminal runs under the
+	// other kind of server, for example an X11 terminal inside a Wayland
+	// session. sixel, iterm2 and chafa make ueberzugpp draw inside the
+	// terminal, which also works over SSH.
 	Output string
 }
 
