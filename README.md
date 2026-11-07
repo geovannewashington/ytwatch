@@ -30,8 +30,8 @@ It also stays light: [yt-dlp](https://github.com/yt-dlp/yt-dlp) searches,
 ## Features
 
 - **One search for everything:** videos, Shorts, live streams and playlists,
-  with filters for type, duration and date, and a language and region of
-  your choice.
+  with filters for type, duration and date, an order by popularity, and a
+  language and region of your choice.
 - **Thumbnails** beside every result. They use `ueberzugpp`, which works the
   same on Wayland, X11 and in terminals like Alacritty and foot that have no
   image protocol of their own.
@@ -122,7 +122,7 @@ mpv keeps playing if you quit ytwatch. Press `?` for help.
 | `Enter` `B` | Play (a whole playlist too) / browse a playlist |
 | `V` | Select several results, then `Enter` plays and `d` downloads them |
 | `d` `a` `Q` | Download / audio only / quality |
-| `f` | Filters: type, duration, date. A new search clears them, `r` keeps them |
+| `f` | Filters: type, duration, date, order. A new search clears them, `r` keeps them |
 | `o` `y` | Open / copy the video link. With a number (`3o`): description link 3 |
 | `u` | Undo the last play or download |
 | `t` | Next color theme |

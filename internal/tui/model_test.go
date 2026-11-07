@@ -477,7 +477,7 @@ func TestFilterMenuFitsTheTerminal(t *testing.T) {
 		m := New("test")
 		m.width, m.height = size[0], size[1]
 		m.showFilters = true
-		m.filterDraft = youtube.Filters{Type: youtube.TypePlaylists, Duration: 3, Date: 4}
+		m.filterDraft = youtube.Filters{Type: youtube.TypePlaylists, Duration: 3, Date: 4, Sort: 1}
 		out := m.View()
 		lines := strings.Split(out, "\n")
 		if len(lines) != size[1] {
@@ -488,7 +488,7 @@ func TestFilterMenuFitsTheTerminal(t *testing.T) {
 				t.Errorf("%v: line %d is %d wide", size, i, w)
 			}
 		}
-		for _, want := range []string{"SEARCH FILTERS", "DURATION", "UPLOAD DATE", "● Playlists", "● Over 20 minutes", "● This year", "What to search for", "Esc cancel"} {
+		for _, want := range []string{"SEARCH FILTERS", "DURATION", "UPLOAD DATE", "● Playlists", "● Over 20 minutes", "● This year", "PRIORITIZE", "● Popularity", "What to search for", "Esc cancel"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("%v: menu is missing %q", size, want)
 			}
@@ -917,6 +917,21 @@ func TestFilterMenuExplainsThatShortsIgnoreTheDate(t *testing.T) {
 	}
 	m.filterDraft.Type = youtube.TypeVideos
 	if out := m.View(); strings.Contains(out, "no date filter") {
+		t.Fatal("the note belongs only to Shorts")
+	}
+}
+
+func TestFilterMenuExplainsThatShortsIgnoreTheSort(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 100, 30
+	m.showFilters = true
+	m.filterDraft = youtube.Filters{Type: youtube.TypeShorts, Sort: 1}
+	m.filterCol = youtube.RowSort
+	if out := m.View(); !strings.Contains(out, "cannot order Shorts") {
+		t.Fatalf("the menu should say why the order does nothing:\n%s", out)
+	}
+	m.filterDraft.Type = youtube.TypePlaylists
+	if out := m.View(); strings.Contains(out, "cannot order") {
 		t.Fatal("the note belongs only to Shorts")
 	}
 }

@@ -22,6 +22,8 @@ func TestParamMatchesYouTubesOwnValues(t *testing.T) {
 		"this month":     {Filters{Date: 3}, "EgQIBBAB"},
 		"this year":      {Filters{Date: 4}, "EgQIBRAB"},
 		"week and long":  {Filters{Date: 2, Duration: 3}, "EgYIAxABGAI="},
+		"popularity":     {Filters{Sort: 1}, "CAM="},
+		"popular, year":  {Filters{Sort: 1, Date: 4}, "CAMSBAgFEAE="},
 	} {
 		if got := tc.filters.Param(); got != tc.want {
 			t.Errorf("%s: Param() = %q, want %q", name, got, tc.want)
@@ -95,5 +97,22 @@ func TestShortsIgnoreTheDateEverywhere(t *testing.T) {
 	}
 	if got := (Filters{Type: TypePlaylists, Date: 2}).Applied().Date; got != 2 {
 		t.Errorf("playlists keep the date, got %d", got)
+	}
+}
+
+// With an order, YouTube's Shorts search returns normal videos instead.
+func TestShortsIgnoreTheSort(t *testing.T) {
+	f := Filters{Type: TypeShorts, Sort: 1}
+	if got := f.Param(); got != "EgIQCQ==" {
+		t.Errorf("Param() = %q, want the plain Shorts filter", got)
+	}
+	if got := f.Summary(); got != "Shorts" {
+		t.Errorf("Summary() = %q, the ignored order should not show", got)
+	}
+	if !f.SortIgnored() || (Filters{Type: TypePlaylists, Sort: 1}).SortIgnored() {
+		t.Error("SortIgnored is wrong")
+	}
+	if got := (Filters{Type: TypePlaylists, Sort: 1}).Param(); got != "CAMSAhAD" {
+		t.Errorf("playlists keep the order, Param() = %q", got)
 	}
 }

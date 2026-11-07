@@ -2872,7 +2872,7 @@ func (m *Model) renderQuality() string {
 }
 
 // filterColumnWidth is the width of one column of the filter menu.
-const filterColumnWidth = 19
+const filterColumnWidth = 18
 
 // renderFilters draws the filter menu as one column per filter, like the
 // filter menu of youtube.com. The chosen option of each column is marked.
@@ -2919,6 +2919,9 @@ func (m *Model) renderFilters() string {
 	if m.filterCol == youtube.RowDate && m.filterDraft.DateIgnored() {
 		help = "YouTube has no date filter for Shorts, so it is ignored."
 	}
+	if m.filterCol == youtube.RowSort && m.filterDraft.SortIgnored() {
+		help = "YouTube cannot order Shorts, so it is ignored."
+	}
 
 	b.WriteString(metaStyle.Render(truncate(help, filterColumnWidth*len(columns))) + "\n")
 	b.WriteString(helpStyle.Render("j/k option · h/l column · Enter search · x reset · Esc cancel"))
@@ -2937,7 +2940,7 @@ func (m *Model) renderHelp() string {
 		{"Enter  B", "Play (all of a playlist) / browse a playlist"},
 		{"Esc", "Back · quits on the main page"},
 		{"/  r", "Edit the search (Up/Down: past ones) / repeat it"},
-		{"f", "Filters: type, duration, upload date"},
+		{"f", "Filters: type, duration, upload date, order"},
 		{"V", "Select several results · Enter plays, d downloads"},
 		{"d  a  Q", "Download / audio only / quality"},
 		{"u", "Undo a play or download (10 s) · Esc, Ctrl+C too"},

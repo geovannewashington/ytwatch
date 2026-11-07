@@ -8,12 +8,13 @@ import (
 
 // Filters are the search filters of the youtube.com results page. Each field
 // is the index of the option in Rows, so the zero value is "no filter": any
-// type, any length, any date.
+// type, any length, any date, by relevance.
 // The names and options follow the filter menu of youtube.com.
 type Filters struct {
 	Type     int
 	Duration int
 	Date     int
+	Sort     int
 }
 
 // Row is one line of the filter menu.
@@ -42,6 +43,11 @@ var Rows = []Row{
 		[]string{"Any", "Today", "This week", "This month", "This year"},
 		"When the video was published.",
 	},
+	{
+		"Prioritize",
+		[]string{"Relevance", "Popularity"},
+		"The order of the results. Popularity: most views first.",
+	},
 }
 
 // Row indexes, for use with Get and Set.
@@ -49,6 +55,7 @@ const (
 	RowType = iota
 	RowDuration
 	RowDate
+	RowSort
 )
 
 // Options of the Type row.
@@ -62,7 +69,7 @@ const (
 
 // Get returns the selected option of a row.
 func (f Filters) Get(row int) int {
-	return [...]int{f.Type, f.Duration, f.Date}[row]
+	return [...]int{f.Type, f.Duration, f.Date, f.Sort}[row]
 }
 
 // Set selects an option of a row, wrapping around the row's options.
@@ -76,21 +83,27 @@ func (f *Filters) Set(row, option int) {
 		f.Duration = option
 	case RowDate:
 		f.Date = option
+	case RowSort:
+		f.Sort = option
 	}
 }
 
 // Applied returns the filters YouTube can apply. It has no upload date filter
-// for Shorts: a search for Shorts with a date finds nothing, so the date is
-// left out.
+// and no order for Shorts: a search for Shorts with a date finds nothing, and
+// one with an order finds normal videos, so both are left out.
 func (f Filters) Applied() Filters {
 	if f.Type == TypeShorts {
 		f.Date = 0
+		f.Sort = 0
 	}
 	return f
 }
 
 // DateIgnored reports whether the upload date is set but has no effect.
 func (f Filters) DateIgnored() bool { return f.Type == TypeShorts }
+
+// SortIgnored reports whether the order is set but has no effect.
+func (f Filters) SortIgnored() bool { return f.Type == TypeShorts }
 
 // Active reports whether any filter differs from the default.
 func (f Filters) Active() bool { return f != Filters{} }
@@ -117,6 +130,7 @@ var (
 	typeCodes     = [...]byte{0, 1, 9, 1, 3} // any, video, Shorts, live (a video), playlist
 	durationCodes = [...]byte{0, 1, 3, 2}    // under 4, 4-20, over 20 minutes
 	dateCodes     = [...]byte{0, 2, 3, 4, 5}
+	sortCodes     = [...]byte{0, 3} // relevance, view count
 )
 
 // Param builds YouTube's "sp" search parameter.
@@ -143,11 +157,18 @@ func (f Filters) Param() string {
 	if f.Type == TypeLive {
 		inner = append(inner, 0x40, 1) // field 8: live
 	}
-	if len(inner) == 0 {
+
+	var out []byte
+	if code := sortCodes[f.Sort]; code != 0 {
+		out = append(out, 0x08, code) // field 1: order
+	}
+	if len(inner) != 0 {
+		out = append(out, 0x12, byte(len(inner))) // field 2: the filters
+		out = append(out, inner...)
+	}
+	if len(out) == 0 {
 		return ""
 	}
-
-	out := append([]byte{0x12, byte(len(inner))}, inner...) // field 2: the filters
 	return base64.StdEncoding.EncodeToString(out)
 }
 
