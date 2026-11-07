@@ -290,6 +290,13 @@ func OpenYouTubeChat(v media.Video, cfg config.Config) error {
 		return fmt.Errorf("could not identify the live video for chat")
 	}
 
+	return OpenChatWindow("https://www.youtube.com/live_chat?is_popout=1&v="+v.ID, cfg)
+}
+
+// OpenChatWindow opens url in a new window of the chat browser (chat.browser,
+// then general.browser, $BROWSER and the desktop's default), and moves the
+// window to the chat workspace.
+func OpenChatWindow(url string, cfg config.Config) error {
 	browser, err := resolveBrowser(
 		cmp.Or(cfg.Chat.Browser, cfg.General.Browser),
 		os.Getenv("BROWSER"),
@@ -300,7 +307,6 @@ func OpenYouTubeChat(v media.Video, cfg config.Config) error {
 		return err
 	}
 
-	url := "https://www.youtube.com/live_chat?is_popout=1&v=" + v.ID
 	args := browser.args
 	if browser.newWindow {
 		args = append(slices.Clone(args), "--new-window")
