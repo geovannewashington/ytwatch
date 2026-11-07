@@ -606,6 +606,35 @@ func TestUpAndDownWalkThroughTheSearchHistory(t *testing.T) {
 	}
 }
 
+func TestAPastedLinkOpensTheVideoOrPlaylistWithoutAHistoryEntry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "history")
+	m := New("")
+	m.history = history.Load(path, 24*time.Hour, 10, time.Now())
+
+	for link, status := range map[string]string{
+		"https://youtu.be/dQw4w9WgXcQ":                           "Opening video...",
+		"https://www.youtube.com/playlist?list=PL4cUxeGkcC9gC":   "Opening playlist...",
+		"https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLabc": "Opening video...",
+	} {
+		if cmd := m.beginSearch(link); cmd == nil {
+			t.Fatalf("%s: nothing started", link)
+		}
+		m.cancel()
+		if m.status != status || m.query != link {
+			t.Errorf("%s: status = %q, query = %q", link, m.status, m.query)
+		}
+	}
+	if got := m.history.Queries(); len(got) != 0 {
+		t.Fatalf("links must not be saved as searches: %q", got)
+	}
+
+	m.beginSearch("programming")
+	m.cancel()
+	if m.status != "Searching..." {
+		t.Fatalf("a word that looks like an ID is a search, status = %q", m.status)
+	}
+}
+
 func TestNoHistoryMeansUpAndDownDoNothing(t *testing.T) {
 	m := New("current")
 	m.handleKey(runeKey('/'))

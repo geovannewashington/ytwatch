@@ -46,6 +46,8 @@ It also stays light: [yt-dlp](https://github.com/yt-dlp/yt-dlp) searches,
 - **Made for Vim users:** `hjkl`, `gg`, `G`, counts like `5j`, `Ctrl+d`, and `V`
   for line selection.
 - **Share a video** by yanking its link with `y`.
+- **Paste a link:** a YouTube link to a video or a playlist in the search line
+  opens it, without a search.
 - **Rice-friendly:** 8 color themes, any color can be changed, and the
   `terminal` theme follows your terminal palette (pywal and similar tools).
 - **Undo a mistake:** `u` (or `Esc`) cancels the last play or download for
@@ -111,6 +113,7 @@ On Debian and Ubuntu the packaged `yt-dlp` is too old for YouTube: use
 ```sh
 ytwatch                  # opens with the search line active
 ytwatch "Go interfaces"  # opens with a search
+ytwatch "https://youtu.be/dQw4w9WgXcQ"  # opens a video or playlist link
 ```
 
 mpv keeps playing if you quit ytwatch. Press `?` for help.
