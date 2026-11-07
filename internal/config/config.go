@@ -153,7 +153,8 @@ type MPV struct {
 }
 
 type Chat struct {
-	// Enabled controls whether live streams open YouTube's chat pop-out.
+	// Enabled controls whether live streams open YouTube's chat pop-out, and
+	// past streams with a chat replay open the replay page of ytwatch.
 	Enabled bool
 	// Workspace is the workspace the chat window is moved to. See MPV.Workspace.
 	// Empty uses the mpv workspace, so chat opens next to the video.

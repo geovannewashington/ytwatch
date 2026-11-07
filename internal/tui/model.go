@@ -167,7 +167,8 @@ type Model struct {
 	historyPos   int    // index in the history while browsing it with Up/Down
 	historyDraft string // what was typed before browsing
 	showHelp     bool
-	animations   int // animOff, animMinimal or animFull, see fx.go
+	sockets      map[string]string // mpv control sockets of the past streams that play, by video id
+	animations   int               // animOff, animMinimal or animFull, see fx.go
 	fx           fxState
 	clock        func() time.Time // replaces time.Now in tests
 	margin       int              // empty columns left of the layout when the terminal is wider than maxWidth
@@ -274,6 +275,7 @@ func New(initialQuery string) *Model {
 		playing:        make(map[string]string),
 		downloading:    make(map[string]string),
 		chatOpened:     make(map[string]bool),
+		sockets:        make(map[string]string),
 		overlay:        &preview.Overlay{},
 		output:         preview.Output{Mode: preview.ModeUeberzug}, // until SetConfig
 		hideOnBlur:     os.Getenv("TMUX") != "",
@@ -749,6 +751,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case playerExitedMsg:
 		for _, id := range msg.ids {
 			delete(m.playing, id)
+			delete(m.sockets, id)
+			delete(m.chatOpened, id)
 		}
 
 		if player.IsForbidden(msg.err) && !msg.opts.WebSafari {
@@ -952,6 +956,12 @@ func (m *Model) handleSearchEvent(event youtube.Event) []tea.Cmd {
 			if err := player.OpenYouTubeChat(event.Video, m.cfg); err == nil {
 				m.chatOpened[event.Video.ID] = true
 				m.status = "Live" + noteMark + "chat opened"
+			}
+		}
+
+		if _, isPlaying := m.playing[event.Video.ID]; isPlaying && event.Video.HasChatReplay() {
+			if err := m.openChatReplay(event.Video, m.sockets[event.Video.ID]); err == nil && m.chatOpened[event.Video.ID] {
+				m.status = chatStatus(event.Video)
 			}
 		}
 
@@ -2198,12 +2208,25 @@ func (m *Model) playQueue() tea.Cmd {
 	return cmd
 }
 
-// startPlayer opens videos in one mpv. A single live stream also opens its chat.
+// chatStatus is the status line after the chat of v opened.
+func chatStatus(v media.Video) string {
+	if v.IsCurrentlyLive() {
+		return "Live" + noteMark + "chat opened"
+	}
+
+	return "Playing" + noteMark + "chat replay opened"
+}
+
+// startPlayer opens videos in one mpv. A single live stream also opens its
+// chat, and so does a single past stream that has a chat replay.
 func (m *Model) startPlayer(videos []media.Video) tea.Cmd {
 	return m.startPlayerWith(videos, player.Options{AudioOnly: m.audioOnly, Quality: m.quality})
 }
 
 func (m *Model) startPlayerWith(videos []media.Video, opts player.Options) tea.Cmd {
+	// The chat replay follows mpv, so mpv needs a socket to tell its time.
+	opts.ControlSocket = len(videos) == 1 && videos[0].IsPastLive() && m.cfg.Chat.Enabled
+
 	cmd, err := player.Start(videos, m.cfg, opts)
 	if err != nil {
 		m.status = err.Error()
@@ -2228,6 +2251,16 @@ func (m *Model) startPlayerWith(videos []media.Video, opts player.Options) tea.C
 				m.status = "Live" + noteMark + "chat opened"
 			} else {
 				m.status = "Live" + noteMark + clean(err.Error())
+			}
+		}
+
+		if socket := cmd.Socket(); socket != "" {
+			m.sockets[v.ID] = socket
+
+			if err := m.openChatReplay(v, socket); err != nil {
+				m.status = "Chat replay" + noteMark + clean(err.Error())
+			} else if m.chatOpened[v.ID] {
+				m.status = chatStatus(v)
 			}
 		}
 	}

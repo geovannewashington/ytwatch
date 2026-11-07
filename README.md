@@ -40,6 +40,8 @@ It also stays light: [yt-dlp](https://github.com/yt-dlp/yt-dlp) searches,
 - **Full live stream support.** Live streams are marked, and their chat opens
   next to the video. Past live streams are marked too, so you can tell a
   recording (VOD) from a normal upload, which YouTube itself does not show.
+  A recording with a chat replay opens it in the chat window too: ytwatch
+  serves a small page on `127.0.0.1` that follows the time of the video in mpv.
 - **Playlists:** `Enter` plays the whole playlist, `B` opens it to pick videos.
 - **Queue and download:** select several results with `V`, then play them in one
   mpv or download them. Choose the quality, or audio only.
@@ -151,7 +153,7 @@ args = []                     # extra mpv arguments, for example ["--volume=60"]
 cookies_from_browser = ""     # for example "firefox"; read "Cookies" below
 
 [chat]
-enabled = true                # open the chat of live streams
+enabled = true                # open the chat of live streams and replays
 workspace = ""                # empty: the same as mpv
 browser = ""                  # empty: general.browser
 
