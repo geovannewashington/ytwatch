@@ -40,6 +40,19 @@ type Process struct {
 	out *os.File // mpv's output; a file, not a pipe, so mpv outlives ytwatch
 
 	cancelled atomic.Bool // set by Cancel, read by Wait in another goroutine
+
+	// socketDir holds mpv's control socket, see Options.ControlSocket. It is
+	// removed when mpv ends while ytwatch runs.
+	socketDir string
+}
+
+// Socket is the path of mpv's control socket, or "" when it has none.
+func (p *Process) Socket() string {
+	if p.socketDir == "" {
+		return ""
+	}
+
+	return filepath.Join(p.socketDir, socketName)
 }
 
 // ErrCancelled is returned by Wait after Cancel stopped mpv.
@@ -71,6 +84,9 @@ func (p *Process) Wait() error {
 	err := p.cmd.Wait()
 	output := tail(p.out)
 	p.out.Close()
+	if p.socketDir != "" {
+		_ = os.RemoveAll(p.socketDir)
+	}
 
 	if p.cancelled.Load() {
 		return ErrCancelled
@@ -151,6 +167,10 @@ type Options struct {
 	// errors some videos give with the default client, but costs about 0.8
 	// seconds of start time, so it is only used to retry after a 403.
 	WebSafari bool
+	// ControlSocket makes mpv listen on a private socket, so that ytwatch can
+	// ask it for the playback time (see PlaybackTime). Only the chat replay
+	// needs it.
+	ControlSocket bool
 }
 
 // IsForbidden reports whether err is mpv failing on an HTTP 403 from YouTube.
@@ -217,6 +237,16 @@ func Start(videos []media.Video, cfg config.Config, opts Options) (*Process, err
 	}
 	args = append(args, cfg.MPV.Args...)
 
+	// The socket is in a directory only the user can open, because whoever
+	// can write to mpv's socket can make mpv run commands.
+	var socketDir string
+	if opts.ControlSocket {
+		if socketDir, err = os.MkdirTemp("", "ytwatch-ipc-"); err != nil {
+			return nil, fmt.Errorf("create mpv socket: %w", err)
+		}
+		args = append(args, "--input-ipc-server="+filepath.Join(socketDir, socketName))
+	}
+
 	cmd := exec.Command(path, append(args, append([]string{"--"}, urls...)...)...)
 	cmd.Stdin = nil
 
@@ -235,6 +265,10 @@ func Start(videos []media.Video, cfg config.Config, opts Options) (*Process, err
 	before := wm.Snapshot(backend)
 	if err := cmd.Start(); err != nil {
 		out.Close()
+		if socketDir != "" {
+			_ = os.RemoveAll(socketDir)
+		}
+
 		return nil, fmt.Errorf("launch mpv: %w", err)
 	}
 
@@ -245,7 +279,7 @@ func Start(videos []media.Video, cfg config.Config, opts Options) (*Process, err
 		windowPlaced()
 	}()
 
-	return &Process{cmd: cmd, out: out}, nil
+	return &Process{cmd: cmd, out: out, socketDir: socketDir}, nil
 }
 
 func OpenYouTubeChat(v media.Video, cfg config.Config) error {
