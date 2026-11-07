@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -68,10 +69,21 @@ type formatSize struct {
 }
 
 // watchData is the part of ytInitialData that holds the number of people
-// watching a stream.
+// watching a stream, and whether the page has a chat replay.
 type watchData struct {
 	Contents struct {
 		TwoColumn struct {
+			// A past stream with a chat replay has a chat panel flagged as a replay.
+			ConversationBar struct {
+				LiveChat struct {
+					IsReplay      bool `json:"isReplay"`
+					Continuations []struct {
+						Reload struct {
+							Continuation string `json:"continuation"`
+						} `json:"reloadContinuationData"`
+					} `json:"continuations"`
+				} `json:"liveChatRenderer"`
+			} `json:"conversationBar"`
 			Results struct {
 				Results struct {
 					Contents []struct {
@@ -105,6 +117,27 @@ func (d watchData) viewers() int64 {
 
 	return 0
 }
+
+// chatReplayToken is the token that opens the chat replay of the page, or ""
+// when the page has no replay. The token ends up in a URL, so an odd one is
+// refused.
+func (d watchData) chatReplayToken() string {
+	chat := d.Contents.TwoColumn.ConversationBar.LiveChat
+	if !chat.IsReplay || len(chat.Continuations) == 0 {
+		return ""
+	}
+
+	token := chat.Continuations[0].Reload.Continuation
+	if len(token) > maxChatTokenLen || !chatTokenPattern.MatchString(token) {
+		return ""
+	}
+
+	return token
+}
+
+const maxChatTokenLen = 2048
+
+var chatTokenPattern = regexp.MustCompile(`^[A-Za-z0-9_%=-]+$`)
 
 func watchURL(id string, loc locale.Locale) string {
 	u := "https://www.youtube.com/watch?v=" + url.QueryEscape(id)
@@ -182,6 +215,8 @@ func parseWatchPage(page []byte, id string) (media.Video, error) {
 	if details.IsLive {
 		video.ConcurrentViewers = data.viewers()
 	}
+
+	video.ChatReplayToken = data.chatReplayToken()
 
 	published := player.Microformat.Renderer.PublishDate
 	if when, err := time.Parse(time.RFC3339, published); err == nil {

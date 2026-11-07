@@ -294,3 +294,43 @@ func TestFetchDetailsBatchStopsWhenTheContextEnds(t *testing.T) {
 		t.Errorf("yt-dlp must not be started for videos nobody wants any more:\n%s", data)
 	}
 }
+
+// chatData is the part of ytInitialData that holds the chat panel.
+func chatData(replay bool, token string) map[string]any {
+	chat := map[string]any{"isReplay": replay}
+	if token != "" {
+		chat["continuations"] = []any{map[string]any{
+			"reloadContinuationData": map[string]any{"continuation": token},
+		}}
+	}
+
+	return map[string]any{"contents": map[string]any{"twoColumnWatchNextResults": map[string]any{
+		"conversationBar": map[string]any{"liveChatRenderer": chat},
+	}}}
+}
+
+func TestParseWatchPageReadsTheChatReplayToken(t *testing.T) {
+	player := recordingPlayer("abcdefghijk")
+	player["videoDetails"].(map[string]any)["isLiveContent"] = true
+
+	for name, tc := range map[string]struct {
+		data map[string]any
+		want string
+	}{
+		"replay":           {chatData(true, "op2w0wRyGl5Da-_x%3D"), "op2w0wRyGl5Da-_x%3D"},
+		"replay, no token": {chatData(true, ""), ""},
+		"live chat":        {chatData(false, "op2w0wRyGl5"), ""},
+		"odd token":        {chatData(true, "a&b=c d"), ""},
+		"no chat":          {viewersData(false, "10"), ""},
+		"empty data":       {nil, ""},
+	} {
+		video, err := parseWatchPage(watchPage(t, player, tc.data), "abcdefghijk")
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if video.ChatReplayToken != tc.want || video.HasChatReplay() != (tc.want != "") {
+			t.Errorf("%s: token = %q, HasChatReplay = %v, want token %q",
+				name, video.ChatReplayToken, video.HasChatReplay(), tc.want)
+		}
+	}
+}

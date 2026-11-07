@@ -48,6 +48,10 @@ type Video struct {
 	ModifiedDate  string          `json:"modified_date"`
 	Entries       []PlaylistEntry `json:"entries"`
 
+	// ChatReplayToken is the continuation token of the chat replay, from the
+	// watch page. The replay window cannot open without it.
+	ChatReplayToken string `json:"-"`
+
 	// Detailed is set once a detail lookup has been merged in. Search results
 	// start without it.
 	Detailed bool `json:"-"`
@@ -178,6 +182,12 @@ func (v Video) IsUpcoming() bool {
 func (v Video) IsPastLive() bool {
 	status := strings.ToLower(v.LiveStatus)
 	return !v.IsCurrentlyLive() && (v.WasLive || status == "was_live" || status == "post_live")
+}
+
+// HasChatReplay reports whether a past stream has a chat replay that can be
+// opened.
+func (v Video) HasChatReplay() bool {
+	return v.IsPastLive() && v.ChatReplayToken != ""
 }
 
 // IsShort is intentionally conservative. Duration alone cannot distinguish a
@@ -482,6 +492,9 @@ func MergeDetails(base, details Video) Video {
 	}
 	if details.WasLive {
 		base.WasLive = true
+	}
+	if details.ChatReplayToken != "" {
+		base.ChatReplayToken = details.ChatReplayToken
 	}
 	if details.MediaType != "" {
 		base.MediaType = details.MediaType

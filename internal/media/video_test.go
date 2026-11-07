@@ -209,3 +209,27 @@ func TestViewsTextSaysWatchingNowForLiveStreams(t *testing.T) {
 		t.Errorf("a recording shows views, got %q", got)
 	}
 }
+
+func TestHasChatReplayNeedsAPastStreamAndAToken(t *testing.T) {
+	for name, tc := range map[string]struct {
+		video Video
+		want  bool
+	}{
+		"past stream with token": {Video{LiveStatus: "was_live", ChatReplayToken: "tok"}, true},
+		"past stream, no token":  {Video{LiveStatus: "was_live"}, false},
+		"plain video":            {Video{LiveStatus: "not_live", ChatReplayToken: "tok"}, false},
+		"stream on air":          {Video{LiveStatus: "is_live", ChatReplayToken: "tok"}, false},
+	} {
+		if got := tc.video.HasChatReplay(); got != tc.want {
+			t.Errorf("%s: HasChatReplay() = %v, want %v", name, got, tc.want)
+		}
+	}
+
+	merged := MergeDetails(Video{ID: "abcdefghijk"}, Video{LiveStatus: "was_live", ChatReplayToken: "tok"})
+	if merged.ChatReplayToken != "tok" {
+		t.Error("MergeDetails should keep the chat replay token")
+	}
+	if kept := MergeDetails(merged, Video{}); kept.ChatReplayToken != "tok" {
+		t.Error("details without a token must not erase it")
+	}
+}
