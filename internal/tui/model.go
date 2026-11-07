@@ -357,6 +357,20 @@ func (m *Model) beginSearch(query string) tea.Cmd {
 	m.searchMode = false
 	m.parents, m.listTitle = nil, ""
 
+	// A pasted link shows that video or playlist. It is not a search, so it
+	// stays out of the history and the filters do not apply.
+	if link, ok := youtube.ParseLink(query); ok {
+		if link.VideoID != "" {
+			return m.startStream("Opening video...", func(ctx context.Context, emit func(youtube.Event)) {
+				youtube.Lookup(ctx, link.VideoID, loc, emit)
+			})
+		}
+		url := link.PlaylistURL()
+		return m.startStream("Opening playlist...", func(ctx context.Context, emit func(youtube.Event)) {
+			youtube.Browse(ctx, url, loc, emit)
+		})
+	}
+
 	if m.history != nil {
 		m.history.Add(query, time.Now())
 	}
