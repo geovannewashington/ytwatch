@@ -41,25 +41,27 @@ type fetchCall struct {
 // by the test for each fetch; every call is recorded.
 type fakeSession struct {
 	*Session
-	mu    sync.Mutex
-	pos   time.Duration
-	err   error
-	now   time.Time
-	calls []fetchCall
-	pages []youtube.ChatPage
-	fail  error
+	mu     sync.Mutex
+	pos    time.Duration
+	paused bool
+	speed  float64
+	err    error
+	now    time.Time
+	calls  []fetchCall
+	pages  []youtube.ChatPage
+	fail   error
 }
 
 func newFake(t *testing.T) *fakeSession {
 	t.Helper()
 
-	f := &fakeSession{now: time.Now()}
+	f := &fakeSession{now: time.Now(), speed: 1}
 	f.Session = NewSession(Options{
 		Title: "A stream", Token: "first", Socket: "unused",
-		Position: func() (time.Duration, error) {
+		State: func() (player.State, error) {
 			f.mu.Lock()
 			defer f.mu.Unlock()
-			return f.pos, f.err
+			return player.State{Time: f.pos, Paused: f.paused, Speed: f.speed}, f.err
 		},
 		Fetch: func(_ context.Context, token string, offset time.Duration, seek bool) (youtube.ChatPage, error) {
 			f.mu.Lock()
@@ -454,5 +456,26 @@ func TestSnapshotNeverPassesAPictureFromAnotherPlace(t *testing.T) {
 	got := page(m)
 	if got.Photo != "" || got.Badges[0].Image != "" || got.Runs[0].Image != "" || got.Runs[0].Alt != ":e:" {
 		t.Errorf("the page must get no address that YouTube's servers do not own: %+v", got)
+	}
+}
+
+func TestSnapshotTellsThePageWhetherTheVideoMoves(t *testing.T) {
+	f := newFake(t)
+
+	f.step(10 * time.Second)
+	if got := f.Snapshot(5); got.Paused || got.Speed != 1 || got.Time != 10 {
+		t.Errorf("playing: %+v", got)
+	}
+
+	f.mu.Lock()
+	f.paused, f.speed = true, 2
+	f.mu.Unlock()
+	f.step(10 * time.Second)
+	if got := f.Snapshot(5); !got.Paused || got.Speed != 2 {
+		t.Errorf("paused at double speed: %+v", got)
+	}
+
+	if got := newFake(t).Snapshot(5); got.Speed != 1 {
+		t.Errorf("before the first answer the speed is 1, got %v", got.Speed)
 	}
 }

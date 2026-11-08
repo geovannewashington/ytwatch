@@ -17,19 +17,16 @@ const pageHTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="dark light">
+<meta name="color-scheme" content="dark">
 <meta name="referrer" content="no-referrer">
 <title>Chat replay</title>
 <style nonce="{{nonce}}">
 :root {
-  color-scheme: dark light;
-  --bg:#0f0f0f; --fg:#f1f1f1; --muted:#9a9aa2; --line:#272727; --card:#1b1b1d;
+  color-scheme: dark;
+  --bg:#000; --stripe:#1a1a1a; --fg:#f1f1f1; --muted:#9a9aa2; --line:#2a2a2a; --card:#2c2c2e;
   --mod:#5e84f1; --member:#2ba640; --owner-bg:#ffd600; --owner-fg:#111; --verified:#aaa;
   --paid-h:#ffb300; --paid-b:#ffca28; --paid-fg:#000000de;
   --member-h:#0f9d58; --gift-h:#0f9d58; --pill:#3ea6ff;
-}
-@media (prefers-color-scheme: light) {
-  :root { --bg:#fff; --fg:#0f0f0f; --muted:#606060; --line:#e5e5e5; --card:#f2f2f2; --mod:#2a5bd7; --member:#1e7e34; --verified:#606060; --pill:#065fd4; }
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
@@ -39,10 +36,16 @@ header b { font-size: 12px; letter-spacing: .08em; }
 #title { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 #clock { color: var(--muted); font-variant-numeric: tabular-nums; }
 #wrap { position: relative; flex: 1; min-height: 0; }
-#list { position: absolute; inset: 0; overflow-y: auto; padding: 8px 12px; display: flex; flex-direction: column; scroll-behavior: smooth; overscroll-behavior: contain; }
+#list { position: absolute; inset: 0; overflow-y: auto; padding: 4px 0; display: flex; flex-direction: column; scroll-behavior: smooth; overscroll-behavior: contain; }
 #list::before { content: ""; margin-top: auto; }
 #list.jump { scroll-behavior: auto; }
-.msg { display: flex; gap: 10px; align-items: flex-start; padding: 4px 0; overflow-wrap: anywhere; }
+/* A row must never shrink: a card has overflow hidden, and in a column of
+   flex items that lets the browser squeeze it and cut its text, instead of
+   letting the list scroll. */
+#list > * { flex: none; }
+.row { padding: 5px 12px; }
+.row.s1 { background: var(--stripe); }
+.msg { display: flex; gap: 10px; align-items: flex-start; overflow-wrap: anywhere; }
 .msg > .body { min-width: 0; }
 .av { flex: none; width: 24px; height: 24px; border-radius: 50%; background: var(--card); color: var(--muted); font-size: 11px; font-weight: 600; display: grid; place-items: center; object-fit: cover; margin-top: 1px; overflow: hidden; text-transform: uppercase; }
 .t { color: var(--muted); font-size: 11px; margin-right: 6px; font-variant-numeric: tabular-nums; }
@@ -58,7 +61,7 @@ header b { font-size: 12px; letter-spacing: .08em; }
 .badge.owner { color: var(--owner-bg); }
 .name.owner .badge { color: var(--owner-fg); }
 .emoji { width: 20px; height: 20px; vertical-align: -5px; margin: 0 1px; }
-.card { margin: 6px 0; border-radius: 8px; overflow: hidden; background: var(--card); overflow-wrap: anywhere; }
+.card { margin: 2px 0; border-radius: 8px; overflow: hidden; background: var(--card); overflow-wrap: anywhere; }
 .card .head { display: flex; gap: 10px; align-items: center; padding: 8px 10px; }
 .card .head .who { min-width: 0; flex: 1; }
 .card .head .amount { font-weight: 600; }
@@ -89,7 +92,9 @@ header b { font-size: 12px; letter-spacing: .08em; }
 (function () {
   "use strict";
 
-  var SEEK = 3;          // seconds: a jump this big in the clock is a seek
+  var SEEK = 3;          // seconds: a jump forward this big in the clock is a seek
+  var BACK = 1;          // seconds: a jump back this big is a seek too
+  var EXTRAPOLATE = 0.5; // seconds: the longest the clock runs without news from mpv
   var MAX_ROWS = 400;    // rows kept on the page
   var ANIMATED = 8;      // rows of one batch that animate, the rest are placed at once
   var list = document.getElementById("list");
@@ -100,13 +105,18 @@ header b { font-size: 12px; letter-spacing: .08em; }
 
   var seen = Object.create(null);   // ids that are on the page or waiting for their time
   var pending = [];                 // messages waiting for their time, by time
-  var clock = { known: false, pos: 0, at: 0, playing: false, last: -1 };
+  var clock = { known: false, pos: 0, at: 0, playing: false, speed: 1 };
   var busy = false;
   var stuck = true;                 // follow the newest message until the user scrolls up
   var autoUntil = 0;                // our own scrolling, which the scroll handler must not take for the user's
 
   function now() { return performance.now() / 1000; }
-  function clockNow() { return clock.playing ? clock.pos + (now() - clock.at) : clock.pos; }
+  // The clock runs between the answers of mpv, but never far: when mpv is
+  // paused or stops answering, nothing more is shown than a moment ahead.
+  function clockNow() {
+    if (!clock.playing) return clock.pos;
+    return clock.pos + Math.min(now() - clock.at, EXTRAPOLATE) * clock.speed;
+  }
 
   function stamp(seconds) {
     var s = Math.max(0, Math.floor(seconds));
@@ -186,7 +196,7 @@ header b { font-size: 12px; letter-spacing: .08em; }
     if (colors.bt && body) body.style.color = colors.bt;
   }
 
-  function row(m) {
+  function inner(m) {
     var node;
 
     if (m.k === 1) {                                   // Super Chat
@@ -224,6 +234,14 @@ header b { font-size: 12px; letter-spacing: .08em; }
     return node;
   }
 
+  var seq = 0;   // the number of rows shown, so that the stripes alternate and stay put
+
+  function row(m) {
+    var wrap = el("div", "row s" + (seq++ % 2));
+    wrap.appendChild(inner(m));
+    return wrap;
+  }
+
   function nearBottom() { return list.scrollHeight - list.scrollTop - list.clientHeight < 60; }
 
   function follow(instant) {
@@ -244,7 +262,7 @@ header b { font-size: 12px; letter-spacing: .08em; }
 
     batch.forEach(function (m, i) {
       var node = row(m);
-      if (i >= batch.length - ANIMATED) node.classList.add("enter");
+      if (i >= batch.length - ANIMATED) node.firstChild.classList.add("enter");
       list.appendChild(node);
     });
 
@@ -258,6 +276,7 @@ header b { font-size: 12px; letter-spacing: .08em; }
     list.textContent = "";
     pending = [];
     seen = Object.create(null);
+    seq = 0;
     more.classList.remove("on");
     stuck = true;
   }
@@ -274,12 +293,12 @@ header b { font-size: 12px; letter-spacing: .08em; }
 
   function render(data) {
     var before = clockNow();
-    if (clock.known && Math.abs(data.time - before) > SEEK && !(data.time === clock.last)) clear();
+    if (clock.known && (data.time - before > SEEK || before - data.time > BACK)) clear();
 
-    clock.playing = !data.ended && data.time !== clock.last;
+    clock.playing = !data.ended && !data.paused;
     clock.pos = data.time;
     clock.at = now();
-    clock.last = data.time;
+    clock.speed = data.speed > 0 ? data.speed : 1;
     clock.known = true;
 
     document.title = "Chat replay - " + data.title;
@@ -316,7 +335,7 @@ header b { font-size: 12px; letter-spacing: .08em; }
   more.addEventListener("click", function () { stuck = true; follow(false); });
 
   poll();
-  setInterval(poll, 700);
+  setInterval(poll, 250);
   requestAnimationFrame(frame);
 })();
 </script>

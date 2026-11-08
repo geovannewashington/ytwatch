@@ -21,7 +21,10 @@ import (
 )
 
 const (
-	pollEvery = 700 * time.Millisecond
+	// pollEvery is how often mpv is asked. It is short because the page shows
+	// a pause as soon as the session knows it, and asking is cheap: it is a
+	// local socket.
+	pollEvery = 250 * time.Millisecond
 
 	// lookahead is how far ahead of the video the messages are fetched.
 	lookahead = 40 * time.Second
@@ -64,10 +67,10 @@ type Options struct {
 	Token  string // the token of the watch page, which opens the replay
 	Socket string // mpv's control socket
 
-	Position func() (time.Duration, error)
-	Fetch    func(ctx context.Context, token string, offset time.Duration, seek bool) (youtube.ChatPage, error)
-	Now      func() time.Time
-	Every    time.Duration
+	State func() (player.State, error)
+	Fetch func(ctx context.Context, token string, offset time.Duration, seek bool) (youtube.ChatPage, error)
+	Now   func() time.Time
+	Every time.Duration
 }
 
 // Session follows one playback of a past stream.
@@ -86,6 +89,8 @@ type Session struct {
 	err      string
 
 	pos       time.Duration
+	paused    bool    // the time does not move: paused, or waiting for data
+	speed     float64 // seconds of video in a second
 	havePos   bool
 	connected bool      // mpv answered at least once
 	failing   time.Time // since when every poll fails, or the zero time
@@ -94,9 +99,9 @@ type Session struct {
 
 // NewSession returns a Session. Run it with Run.
 func NewSession(opts Options) *Session {
-	if opts.Position == nil {
+	if opts.State == nil {
 		socket := opts.Socket
-		opts.Position = func() (time.Duration, error) { return player.PlaybackTime(socket) }
+		opts.State = func() (player.State, error) { return player.PlaybackState(socket) }
 	}
 	if opts.Fetch == nil {
 		opts.Fetch = youtube.FetchChat
@@ -144,7 +149,8 @@ const (
 // step asks mpv for the time, and starts a fetch when the messages do not
 // reach far enough ahead of it.
 func (s *Session) step(ctx context.Context) {
-	pos, err := s.opts.Position()
+	state, err := s.opts.State()
+	pos := state.Time
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -172,6 +178,7 @@ func (s *Session) step(ctx context.Context) {
 		return
 	}
 	s.pos, s.havePos, s.connected, s.failing = pos, true, true, time.Time{}
+	s.paused, s.speed = state.Paused, state.Speed
 
 	var token string
 	var offset time.Duration
@@ -342,7 +349,9 @@ type Message struct {
 // Snapshot is what the page shows.
 type Snapshot struct {
 	Title    string    `json:"title"`
-	Time     float64   `json:"time"` // seconds into the video
+	Time     float64   `json:"time"`   // seconds into the video
+	Paused   bool      `json:"paused"` // the time does not move
+	Speed    float64   `json:"speed"`  // seconds of video in a second
 	Ended    bool      `json:"ended"`
 	Status   string    `json:"status"` // why there is nothing to show, or ""
 	Messages []Message `json:"messages"`
@@ -354,7 +363,13 @@ func (s *Session) Snapshot(limit int) Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	snapshot := Snapshot{Title: s.opts.Title, Time: s.pos.Seconds(), Ended: s.ended, Messages: []Message{}}
+	snapshot := Snapshot{
+		Title: s.opts.Title, Time: s.pos.Seconds(), Paused: s.paused, Speed: max(s.speed, 1e-3),
+		Ended: s.ended, Messages: []Message{},
+	}
+	if s.speed == 0 {
+		snapshot.Speed = 1
+	}
 
 	// messages is sorted by time, so the ones to show are a prefix.
 	upTo := s.pos + ahead
