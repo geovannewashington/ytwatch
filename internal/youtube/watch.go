@@ -56,6 +56,13 @@ type playerResponse struct {
 		} `json:"playerMicroformatRenderer"`
 	} `json:"microformat"`
 
+	// The small pictures of the video, for the seek bar.
+	Storyboards struct {
+		Renderer struct {
+			Spec string `json:"spec"`
+		} `json:"playerStoryboardSpecRenderer"`
+	} `json:"storyboards"`
+
 	// The size of the video tells a Short (tall) from other videos.
 	StreamingData struct {
 		Formats         []formatSize `json:"formats"`
@@ -71,6 +78,26 @@ type formatSize struct {
 // watchData is the part of ytInitialData that holds the number of people
 // watching a stream, and whether the page has a chat replay.
 type watchData struct {
+	// The "most replayed" graph is in the entity updates of the page.
+	FrameworkUpdates struct {
+		Batch struct {
+			Mutations []struct {
+				Payload struct {
+					Markers struct {
+						List struct {
+							Type    string `json:"markerType"`
+							Markers []struct {
+								Start    string  `json:"startMillis"`
+								Duration string  `json:"durationMillis"`
+								Score    float64 `json:"intensityScoreNormalized"`
+							} `json:"markers"`
+						} `json:"markersList"`
+					} `json:"macroMarkersListEntity"`
+				} `json:"payload"`
+			} `json:"mutations"`
+		} `json:"entityBatchUpdate"`
+	} `json:"frameworkUpdates"`
+
 	Contents struct {
 		TwoColumn struct {
 			// A past stream with a chat replay has a chat panel flagged as a replay.
@@ -129,6 +156,38 @@ func (d watchData) viewers() int64 {
 	}
 
 	return 0
+}
+
+// maxHeatmap bounds the number of points taken from the page.
+const maxHeatmap = 256
+
+// heatmap is the "most replayed" graph of the page, or nil. The page gives it
+// as parts of equal length; only their order and score are kept, which is all
+// a graph over the length of the video needs. Scores outside 0 to 1 are cut.
+func (d watchData) heatmap() []float64 {
+	for _, mutation := range d.FrameworkUpdates.Batch.Mutations {
+		list := mutation.Payload.Markers.List
+		if list.Type != "MARKER_TYPE_HEATMAP" || len(list.Markers) < 2 {
+			continue
+		}
+
+		points := make([]float64, 0, min(len(list.Markers), maxHeatmap))
+		for _, marker := range list.Markers {
+			if len(points) == maxHeatmap {
+				break
+			}
+
+			score := marker.Score
+			if score != score { // not a number
+				score = 0
+			}
+			points = append(points, min(1, max(0, score)))
+		}
+
+		return points
+	}
+
+	return nil
 }
 
 // channelBadges tells whether the channel of the video is verified, and
@@ -248,6 +307,8 @@ func parseWatchPage(page []byte, id string) (media.Video, error) {
 
 	video.ChatReplayToken = data.chatReplayToken()
 	video.ChannelVerified, video.ChannelArtist = data.channelBadges()
+	video.Heatmap = data.heatmap()
+	video.StoryboardSpec = player.Storyboards.Renderer.Spec
 
 	published := player.Microformat.Renderer.PublishDate
 	if when, err := time.Parse(time.RFC3339, published); err == nil {

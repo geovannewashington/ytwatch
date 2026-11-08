@@ -54,6 +54,14 @@ type Video struct {
 	ModifiedDate  string          `json:"modified_date"`
 	Entries       []PlaylistEntry `json:"entries"`
 
+	// Heatmap is the "most replayed" graph of the video: how much each equal
+	// part of it was watched again, from 0 to 1. It is empty for a video without
+	// enough views.
+	Heatmap []float64 `json:"-"`
+	// StoryboardSpec describes the small pictures of the video that the seek bar
+	// shows under the mouse, as the watch page gives it. See package storyboard.
+	StoryboardSpec string `json:"-"`
+
 	// ChatReplayToken is the continuation token of the chat replay, from the
 	// watch page. The replay window cannot open without it.
 	ChatReplayToken string `json:"-"`
@@ -524,6 +532,12 @@ func MergeDetails(base, details Video) Video {
 	}
 	if details.WasLive {
 		base.WasLive = true
+	}
+	if len(details.Heatmap) > 0 {
+		base.Heatmap = details.Heatmap
+	}
+	if details.StoryboardSpec != "" {
+		base.StoryboardSpec = details.StoryboardSpec
 	}
 	if details.ChatReplayToken != "" {
 		base.ChatReplayToken = details.ChatReplayToken

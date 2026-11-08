@@ -6,6 +6,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -371,5 +373,67 @@ func TestParseWatchPageReadsTheChannelBadges(t *testing.T) {
 		if video.ChannelVerified != tc.verified || video.ChannelArtist != tc.artist {
 			t.Errorf("%s: verified = %v, artist = %v", name, video.ChannelVerified, video.ChannelArtist)
 		}
+	}
+}
+
+// markersData is the part of ytInitialData that holds lists of markers: the
+// "most replayed" graph, or the chapters.
+func markersData(kind string, scores ...float64) map[string]any {
+	markers := []any{}
+	for i, score := range scores {
+		markers = append(markers, map[string]any{
+			"startMillis": strconv.Itoa(i * 2000), "durationMillis": "2000", "intensityScoreNormalized": score,
+		})
+	}
+
+	return map[string]any{"frameworkUpdates": map[string]any{"entityBatchUpdate": map[string]any{"mutations": []any{
+		map[string]any{"payload": map[string]any{"macroMarkersListEntity": map[string]any{
+			"markersList": map[string]any{"markerType": kind, "markers": markers},
+		}}},
+	}}}}
+}
+
+func TestParseWatchPageReadsTheMostReplayedGraph(t *testing.T) {
+	for name, tc := range map[string]struct {
+		data map[string]any
+		want []float64
+	}{
+		"a graph":                  {markersData("MARKER_TYPE_HEATMAP", 1, 0.5, 0.25, 0), []float64{1, 0.5, 0.25, 0}},
+		"scores are cut to 0-1":    {markersData("MARKER_TYPE_HEATMAP", 7, -3, 0.5), []float64{1, 0, 0.5}},
+		"chapters are not a graph": {markersData("MARKER_TYPE_CHAPTERS", 1, 0.5), nil},
+		"one point is no graph":    {markersData("MARKER_TYPE_HEATMAP", 1), nil},
+		"no markers":               {nil, nil},
+	} {
+		video, err := parseWatchPage(watchPage(t, recordingPlayer("abcdefghijk"), tc.data), "abcdefghijk")
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !slices.Equal(video.Heatmap, tc.want) {
+			t.Errorf("%s: Heatmap = %v, want %v", name, video.Heatmap, tc.want)
+		}
+	}
+
+	many := make([]float64, maxHeatmap+50)
+	for i := range many {
+		many[i] = 0.5
+	}
+	video, _ := parseWatchPage(watchPage(t, recordingPlayer("abcdefghijk"), markersData("MARKER_TYPE_HEATMAP", many...)), "abcdefghijk")
+	if len(video.Heatmap) != maxHeatmap {
+		t.Errorf("a page cannot make the graph grow without limit: %d points", len(video.Heatmap))
+	}
+}
+
+func TestParseWatchPageReadsTheStoryboardSpec(t *testing.T) {
+	player := recordingPlayer("abcdefghijk")
+	player["storyboards"] = map[string]any{"playerStoryboardSpecRenderer": map[string]any{"spec": "https://i.ytimg.com/sb/abc/storyboard3_L$L/$N.jpg?sqp=x|48#27#100#10#10#0#default#rs$A"}}
+
+	video, err := parseWatchPage(watchPage(t, player, nil), "abcdefghijk")
+	if err != nil || video.StoryboardSpec != "https://i.ytimg.com/sb/abc/storyboard3_L$L/$N.jpg?sqp=x|48#27#100#10#10#0#default#rs$A" {
+		t.Errorf("spec = %q, err = %v", video.StoryboardSpec, err)
+	}
+
+	plain, _ := parseWatchPage(watchPage(t, recordingPlayer("abcdefghijk"), nil), "abcdefghijk")
+	if plain.StoryboardSpec != "" {
+		t.Error("a page without storyboards has no spec")
 	}
 }
