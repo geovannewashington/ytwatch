@@ -18,7 +18,7 @@
   it when the pane loses focus, but tmux only reports that with
   `set -g focus-events on` in `tmux.conf`. `ytwatch doctor` checks it.
 - **With ueberzugpp, the thumbnail is a tiled window on Hyprland.** Add a window
-  rule, see [hyprland.md](hyprland.md).
+  rule, see [below](#thumbnails-on-hyprland).
 - **Results differ from youtube.com.** ytwatch is not logged in, and YouTube
   personalizes by account. Set `language` and `region` under `[search]`. The
   region is sent as a fake address, which YouTube may ignore.
@@ -35,3 +35,33 @@ playing and downloading.
 It is off by default because it reads that browser's cookies, and because a
 logged-in view can feed that account's recommendations, which is what ytwatch
 tries to avoid. Use a browser profile with a separate or throwaway account.
+
+## Thumbnails on Hyprland
+
+**Symptom:** the thumbnail opens as its own tiled window.
+
+ueberzugpp draws the `wayland` thumbnail in a window of its own and can only
+place it over the terminal when that window floats. Add a window rule for it.
+
+With a Lua config (as Omarchy ships it), in `hyprland.lua`:
+
+```lua
+hl.window_rule({
+  match = { class = "^(ueberzugpp_.*)$" },
+  float = true, no_anim = true, no_shadow = true, no_focus = true,
+})
+```
+
+With a Lua config, ueberzugpp 2.9.10 and older still open the thumbnail
+centered: they move the window with a legacy `hyprctl dispatch`, which Lua
+configs reject. Newer builds (`ueberzugpp-git` on the AUR) support the Lua
+config.
+
+With a `hyprland.conf`:
+
+```ini
+windowrule = float, class:^(ueberzugpp_.*)$
+windowrule = noanim, class:^(ueberzugpp_.*)$
+windowrule = noshadow, class:^(ueberzugpp_.*)$
+windowrule = nofocus, class:^(ueberzugpp_.*)$
+```

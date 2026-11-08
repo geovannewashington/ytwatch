@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/logo/wordmark.svg" width="380" alt="ytwatch">
+<img src="docs/assets/wordmark.svg" width="380" alt="ytwatch">
 
 Search and watch YouTube from your terminal.<br>
 No feed, no recommendations, no autoplay.
@@ -11,7 +11,7 @@ No feed, no recommendations, no autoplay.
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-linux-lightgrey)](#install)
 
-![ytwatch](docs/screenshot.png)
+![ytwatch](docs/assets/screenshot.png)
 
 </div>
 
@@ -98,6 +98,9 @@ and thumbnails for 7. Both can be turned off. See
 [Cookies](docs/troubleshooting.md#cookies) for the one setting that reads
 browser data.
 
+Found a security problem? Please report it privately: the **Security** tab of
+the repository, then **Report a vulnerability**.
+
 ## More
 
 - [Configuration](docs/configuration.md): every option with its default.
@@ -107,4 +110,4 @@ browser data.
 
 ## License
 
-[MIT](LICENSE). Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
+[MIT](LICENSE). Contributions are welcome: open an issue or a pull request.
