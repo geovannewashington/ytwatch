@@ -11,7 +11,7 @@ No feed, no recommendations, no autoplay.
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-linux-lightgrey)](#install)
 
-![ytwatch](docs/assets/screenshot.png)
+https://github.com/user-attachments/assets/f9ed9f1b-6697-43c1-9a8e-53046f06a808
 
 </div>
 
