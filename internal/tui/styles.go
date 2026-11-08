@@ -26,6 +26,7 @@ var (
 	metaStyle          lipgloss.Style
 	descriptionStyle   lipgloss.Style
 	liveBadgeStyle     lipgloss.Style
+	progressStyle      lipgloss.Style
 	shortBadgeStyle    lipgloss.Style
 	upcomingBadgeStyle lipgloss.Style
 	pastLiveBadgeStyle lipgloss.Style
@@ -67,6 +68,7 @@ func ApplyTheme(t theme.Theme) {
 	metaStyle = plain(muted)
 	descriptionStyle = lipgloss.NewStyle()
 	liveBadgeStyle = plain(color("live"))
+	progressStyle = plain(color("live"))
 	shortBadgeStyle = plain(color("short"))
 	upcomingBadgeStyle = plain(secondary)
 	pastLiveBadgeStyle = plain(color("vod"))

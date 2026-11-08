@@ -170,6 +170,8 @@ type Model struct {
 	showHelp     bool
 	sockets      map[string]string        // mpv control sockets of the past streams that play, by video id
 	chats        map[string]*chat.Session // the chat replays that follow them, by video id
+	resumeDir    string                   // where mpv keeps the position of each video, see resume.go
+	progress     map[string]time.Duration // the position of each video that was left, by video id
 	animations   int                      // animOff, animMinimal or animFull, see fx.go
 	fx           fxState
 	clock        func() time.Time // replaces time.Now in tests
@@ -752,6 +754,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case playerExitedMsg:
+		m.refreshProgress() // mpv wrote the position when it quit
+
 		for _, id := range msg.ids {
 			delete(m.playing, id)
 			delete(m.sockets, id)
@@ -1282,6 +1286,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	case "enter":
 		return m.playSelected()
+
+	case "s":
+		return m.playSelectedFrom(true)
 
 	case "h", "left":
 		m.focus = resultsPane
@@ -2164,7 +2171,11 @@ func (m *Model) previewGeometry() (leftOuterWidth, rightInnerWidth, thumbRows, y
 
 // playSelected plays the current result in mpv, or all of a visual selection
 // as one queue.
-func (m *Model) playSelected() tea.Cmd {
+func (m *Model) playSelected() tea.Cmd { return m.playSelectedFrom(false) }
+
+// playSelectedFrom is playSelected, and with startOver it plays from the start
+// a video that was left halfway.
+func (m *Model) playSelectedFrom(startOver bool) tea.Cmd {
 	if m.visual {
 		return m.playQueue()
 	}
@@ -2185,7 +2196,7 @@ func (m *Model) playSelected() tea.Cmd {
 		return nil
 	}
 
-	return m.startPlayer([]media.Video{v})
+	return m.startPlayerWith([]media.Video{v}, player.Options{AudioOnly: m.audioOnly, Quality: m.quality, StartOver: startOver})
 }
 
 // playQueue plays the visual selection in one mpv, which steps through it
@@ -2234,8 +2245,12 @@ func (m *Model) startPlayer(videos []media.Video) tea.Cmd {
 }
 
 func (m *Model) startPlayerWith(videos []media.Video, opts player.Options) tea.Cmd {
-	// The chat replay follows mpv, so mpv needs a socket to tell its time.
-	opts.ControlSocket = len(videos) == 1 && videos[0].IsPastLive() && m.cfg.Chat.Enabled
+	// The chat replay follows mpv, so mpv needs a socket to tell its time. A
+	// result without details may turn out to be a past stream, and its chat is
+	// opened when the details arrive, so it gets a socket too.
+	opts.ControlSocket = len(videos) == 1 && m.cfg.Chat.Enabled && !videos[0].IsCurrentlyLive() &&
+		(videos[0].IsPastLive() || !videos[0].Detailed && !videos[0].IsShort() && !videos[0].IsPlaylist())
+	opts = m.resumeOptions(videos, opts)
 
 	cmd, err := player.Start(videos, m.cfg, opts)
 	if err != nil {
@@ -2254,6 +2269,9 @@ func (m *Model) startPlayerWith(videos []media.Video, opts player.Options) tea.C
 	} else {
 		v := videos[0]
 		m.status = "Playing" + noteMark + clean(v.Title)
+		if text := m.resumeStatus(videos, opts); text != "" {
+			m.status = text + noteMark + clean(v.Title)
+		}
 
 		if v.IsCurrentlyLive() {
 			if err := player.OpenYouTubeChat(v, m.cfg); err == nil {
@@ -2608,7 +2626,6 @@ func (m *Model) renderResultLines(width, height int) string {
 		if text, ok := durationPart(v); ok {
 			meta += " · " + text
 		}
-
 		if v.IsPlaylist() {
 			meta = strings.Join(
 				append([]string{channelText(v), "playlist"}, playlistFacts(v)...),
@@ -2628,11 +2645,23 @@ func (m *Model) renderResultLines(width, height int) string {
 			meta += " · " + age
 		}
 
-		meta = truncate(meta, width-2)
+		bar := m.listBar(v)
+		room := width
+		if bar != "" {
+			room = width - listBarWidth - 1
+		}
+
+		meta = truncate(meta, room-2)
 		if selected {
-			lines = append(lines, selectedMetaStyle.Render(padToWidth("  "+meta, width)))
+			lines = append(lines, selectedMetaStyle.Render(padToWidth("  "+meta, room)))
+		} else if bar != "" {
+			lines = append(lines, metaStyle.Render(padToWidth("  "+meta, room)))
 		} else {
 			lines = append(lines, metaStyle.Render("  "+meta))
+		}
+
+		if bar != "" {
+			lines[len(lines)-1] += " " + bar
 		}
 	}
 
@@ -2830,6 +2859,10 @@ func (m *Model) renderPreview(width, height int) string {
 		}
 
 		lines = append(lines, metaStyle.Render(truncate(strings.Join(stats, " · "), width)))
+
+		if bar := m.previewProgress(v, width); bar != "" && !v.IsPlaylist() {
+			lines = append(lines, bar)
+		}
 
 		if section, style := m.streamSection(v, width); len(section) > 0 {
 			lines = append(lines, "")
@@ -3082,6 +3115,7 @@ func (m *Model) renderHelp() string {
 		{"j k", "Move through the results"},
 		{"h l", "Switch between the results and the preview"},
 		{"Enter  B", "Play (all of a playlist) / browse a playlist"},
+		{"s", "Play from the start a video that was left halfway"},
 		{"Esc", "Back · quits on the main page"},
 		{"/  r", "Edit the search (Up/Down: past ones) / repeat it"},
 		{"f", "Filters: type, duration, upload date"},

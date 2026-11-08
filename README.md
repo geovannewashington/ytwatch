@@ -43,6 +43,9 @@ It also stays light: [yt-dlp](https://github.com/yt-dlp/yt-dlp) searches,
   A recording with a chat replay opens it in the chat window too: ytwatch
   serves a small page on `127.0.0.1` that follows the time of the video in mpv,
   with profile pictures, member and moderator badges, emoji and Super Chats.
+- **Pick up where you left off:** a video you stopped halfway shows a progress
+  thin red bar in the list and starts from there the next time (`s` plays it from the
+  start). A video seen to its end starts over.
 - **Playlists:** `Enter` plays the whole playlist, `B` opens it to pick videos.
 - **Queue and download:** select several results with `V`, then play them in one
   mpv or download them. Choose the quality, or audio only.
@@ -128,6 +131,7 @@ mpv keeps playing if you quit ytwatch. Press `?` for help.
 | `/` `r` | Edit the search (`Up` `Down` for past ones) / repeat it |
 | `j` `k` `h` `l` | Move / switch between results and preview |
 | `Enter` `B` | Play (a whole playlist too) / browse a playlist |
+| `s` | Play from the start a video that was left halfway |
 | `V` | Select several results, then `Enter` plays and `d` downloads them |
 | `d` `a` `Q` | Download / audio only / quality |
 | `f` | Filters: type, duration, date. A new search clears them, `r` keeps them |
@@ -179,8 +183,9 @@ hide = []                     # never show: shorts, playlists, live, upcoming, v
 
 [history]
 enabled = true
-max_age_days = 30
+max_age_days = 30             # also how long the place in a video is remembered
 max_entries = 100
+resume = true                 # remember where you stopped in each video (needs enabled = true)
 
 [cache]                       # thumbnails
 max_age_days = 7
@@ -200,7 +205,9 @@ Workspace names follow your window manager: a name or number for sway, i3 and
 niri, `3` or `name:video` for Hyprland, `^2` for bspwm, a number from 1 for
 `wmctrl`.
 
-Other files: search history in `~/.local/state/ytwatch/history`, thumbnails in
+Other files: search history in `~/.local/state/ytwatch/history`, the place where
+you stopped in each video in `~/.local/state/ytwatch/watch_later` (mpv writes
+them, and your own mpv files are left alone), thumbnails in
 `~/.cache/ytwatch/thumbnails`.
 
 ## Privacy
@@ -211,9 +218,11 @@ servers (`youtube.com` and `i.ytimg.com` for searches and thumbnails, and
 `mpv`, and to nobody else. The chat replay page also loads the profile
 pictures, badges and emoji of the chat in your browser, from YouTube's image
 servers only (`*.ggpht.com` and `fonts.gstatic.com`), without telling them
-which page asked. On your disk it keeps a history of your searches (30
-days) and a cache of thumbnails (7 days), and deletes them when they expire.
-You can turn the history off in `config.toml`, and thumbnails with
+which page asked. On your disk it keeps a history of your searches and the
+place where you stopped in each video (30 days) and a cache of thumbnails (7
+days), and deletes them when they expire. You can turn the history off in
+`config.toml` (that also stops remembering your place in videos, or turn off just
+that with `resume = false`), and thumbnails with
 `[preview] output = "off"`. See [Cookies](#cookies) for the one setting that
 reads browser data.
 

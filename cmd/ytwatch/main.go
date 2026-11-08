@@ -12,6 +12,7 @@ import (
 
 	"github.com/geovannewashington/ytwatch/internal/config"
 	"github.com/geovannewashington/ytwatch/internal/preview"
+	"github.com/geovannewashington/ytwatch/internal/resume"
 	"github.com/geovannewashington/ytwatch/internal/tui"
 )
 
@@ -106,6 +107,15 @@ func main() {
 	model := tui.New(query)
 	model.SetKitty(preview.NewKitty(terminal, os.Getenv("TMUX") != ""), detected)
 	model.SetConfig(cfg)
+
+	// mpv remembers where each video was left, in a folder of ytwatch, and the
+	// old positions are deleted when they are older than the history is kept.
+	if cfg.History.Resumes() {
+		if dir := resume.Dir(); resume.Prepare(dir) == nil {
+			resume.Prune(dir, time.Duration(cfg.History.MaxAgeDays)*24*time.Hour, time.Now())
+			model.SetResume(dir)
+		}
+	}
 	program := tea.NewProgram(model, tea.WithOutput(terminal), tea.WithAltScreen(), tea.WithReportFocus())
 	model.Attach(program.Send)
 
