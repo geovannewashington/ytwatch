@@ -2,8 +2,7 @@
 
 <img src="docs/assets/wordmark.svg" width="380" alt="ytwatch">
 
-Search and watch YouTube from your terminal.<br>
-No feed, no recommendations, no autoplay.
+A terminal YouTube search that opens videos in mpv, and leaves the feed out 🌊
 
 [![CI](https://github.com/geovannewashington/ytwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/geovannewashington/ytwatch/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/geovannewashington/ytwatch)](https://github.com/geovannewashington/ytwatch/releases/latest)
@@ -19,8 +18,8 @@ https://github.com/user-attachments/assets/f9ed9f1b-6697-43c1-9a8e-53046f06a808
 
 Even logged out, youtube.com gives you a home feed, suggestions, autoplay and
 Shorts. ytwatch has none of that: you search for what you want, watch it, and
-leave. No account, no comments, no likes. Want the comments? `o` opens the
-video in your browser.
+leave. Accounts, comments and likes are left out. Want the comments? `o`
+opens the video in your browser.
 
 It is also light. [yt-dlp](https://github.com/yt-dlp/yt-dlp) searches,
 [mpv](https://mpv.io) plays, and no browser window stays open while you watch.
