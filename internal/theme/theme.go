@@ -25,7 +25,7 @@ var Roles = []string{
 }
 
 // Default is the theme used when none is configured.
-const Default = "everforest"
+const Default = "catppuccin"
 
 // Theme is a named set of colours. A colour is a hex value such as "#a7c080"
 // or a terminal palette number from 0 to 255 such as "2".
@@ -45,8 +45,9 @@ func colors(accent, secondary, live, short, vod, muted, subtle, border, errorCol
 }
 
 var presets = []Theme{
-	{"everforest", colors("#a7c080", "#83c092", "#e67e80", "#dbbc7f", "#e69875", "#859289", "#9da9a0", "#4f5b58", "#e67e80")},
+	// catppuccin is the Mocha flavor of Catppuccin, and the default.
 	{"catppuccin", colors("#a6e3a1", "#94e2d5", "#f38ba8", "#f9e2af", "#fab387", "#7f849c", "#a6adc8", "#45475a", "#f38ba8")},
+	{"everforest", colors("#a7c080", "#83c092", "#e67e80", "#dbbc7f", "#e69875", "#859289", "#9da9a0", "#4f5b58", "#e67e80")},
 	{"gruvbox", colors("#b8bb26", "#8ec07c", "#fb4934", "#fabd2f", "#fe8019", "#928374", "#a89984", "#504945", "#fb4934")},
 	{"nord", colors("#a3be8c", "#88c0d0", "#bf616a", "#ebcb8b", "#d08770", "#7b88a1", "#9aa5ba", "#4c566a", "#bf616a")},
 	{"tokyonight", colors("#9ece6a", "#7dcfff", "#f7768e", "#e0af68", "#ff9e64", "#737aa2", "#a9b1d6", "#3b4261", "#f7768e")},

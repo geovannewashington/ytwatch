@@ -294,7 +294,7 @@ func TestReadmeConfigParsesAndMatchesTheDefaults(t *testing.T) {
 	if cfg.MPV.Workspace != "" || cfg.MPV.CookiesFromBrowser != "" || len(cfg.MPV.Args) != 0 {
 		t.Errorf("mpv should be empty by default: %+v", cfg.MPV)
 	}
-	if cfg.Theme.Name != "everforest" || cfg.Preview.Output != "auto" {
+	if cfg.Theme.Name != "catppuccin" || cfg.Preview.Output != "auto" {
 		t.Errorf("theme or preview: %+v %+v", cfg.Theme, cfg.Preview)
 	}
 }

@@ -163,8 +163,8 @@ dir = "~/Downloads/ytwatch"
 args = []                     # extra yt-dlp arguments, for example ["--embed-metadata"]
 
 [theme]
-name = "everforest"           # catppuccin, gruvbox, nord, tokyonight, rose-pine, dracula, terminal
-# accent = "#a7c080"          # any color: accent, secondary, live, short, vod, muted, subtle, border, error
+name = "catppuccin"           # everforest, gruvbox, nord, tokyonight, rose-pine, dracula, terminal
+# accent = "#a6e3a1"          # any color: accent, secondary, live, short, vod, muted, subtle, border, error
 
 [preview]
 output = "auto"               # auto, off, kitty, halfblocks, ueberzugpp, x11, wayland, sixel, iterm2, chafa
