@@ -43,6 +43,10 @@ It also stays light: [yt-dlp](https://github.com/yt-dlp/yt-dlp) searches,
   A recording with a chat replay opens it in the chat window too: ytwatch
   serves a small page on `127.0.0.1` that follows the time of the video in mpv,
   with profile pictures, member and moderator badges, emoji and Super Chats.
+- **Player controls like YouTube's:** mpv gets a red progress bar with the
+  buffered part, the "most replayed" graph and a small picture of the video
+  under the mouse (for videos that have them), a title, and volume, speed,
+  subtitles and full screen buttons, and everything fades when the mouse rests.
 - **Pick up where you left off:** a video you stopped halfway shows a progress
   thin red bar in the list and starts from there the next time (`s` plays it from the
   start). A video seen to its end starts over.
@@ -156,6 +160,7 @@ quality = "best"              # best, 1080p, 720p, 480p, 360p
 workspace = ""                # move mpv windows here; empty: leave them where the WM puts them
 args = []                     # extra mpv arguments, for example ["--volume=60"]
 cookies_from_browser = ""     # for example "firefox"; read "Cookies" below
+ui = "ytwatch"                # "ytwatch": controls like YouTube's; "mpv": keep mpv's own (or your uosc)
 subtitles = ""                # languages in order of preference, as YouTube names them: "en,pt-BR"; empty: none (j cycles in mpv)
 auto_subtitles = false        # also use YouTube's automatic captions for those languages
 
@@ -205,7 +210,9 @@ Workspace names follow your window manager: a name or number for sway, i3 and
 niri, `3` or `name:video` for Hyprland, `^2` for bspwm, a number from 1 for
 `wmctrl`.
 
-Other files: search history in `~/.local/state/ytwatch/history`, the place where
+While a video plays, its script, data and the small pictures of the seek bar are
+in a private folder `ytwatch-mpv-*` of the temporary folder, removed when mpv
+ends. Other files: search history in `~/.local/state/ytwatch/history`, the place where
 you stopped in each video in `~/.local/state/ytwatch/watch_later` (mpv writes
 them, and your own mpv files are left alone), thumbnails in
 `~/.cache/ytwatch/thumbnails`.

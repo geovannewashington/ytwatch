@@ -362,3 +362,23 @@ func TestParseHistoryResume(t *testing.T) {
 		t.Error("a boolean is expected")
 	}
 }
+
+func TestParseMpvUI(t *testing.T) {
+	def, _ := Parse("")
+	if def.MPV.UI != "ytwatch" {
+		t.Errorf("the controls of ytwatch are the default: %q", def.MPV.UI)
+	}
+
+	for value, want := range map[string]string{`"mpv"`: "mpv", `"ytwatch"`: "ytwatch", `"MPV"`: "mpv", `" ytwatch "`: "ytwatch"} {
+		cfg, err := Parse("[mpv]\nui = " + value)
+		if err != nil || cfg.MPV.UI != want {
+			t.Errorf("ui = %s: %q, %v", value, cfg.MPV.UI, err)
+		}
+	}
+
+	for _, value := range []string{`"yt"`, `""`, `"mpv;rm"`} {
+		if _, err := Parse("[mpv]\nui = " + value); err == nil {
+			t.Errorf("ui = %s should be refused", value)
+		}
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/geovannewashington/ytwatch/internal/config"
 	"github.com/geovannewashington/ytwatch/internal/media"
@@ -199,5 +200,107 @@ func TestMpvKnowsReadsTheOptionList(t *testing.T) {
 
 	if !mpvKnows("--watch-later-options") || !mpvKnows("--save-position-on-quit") || mpvKnows("--watch-later") || mpvKnows("--nothing") {
 		t.Error("an option is known only when it is a whole name in the list")
+	}
+}
+
+func TestStartGivesMpvTheControlsOfYtwatch(t *testing.T) {
+	out := fakeMPV(t)
+	v := media.Video{ID: "video0001", Title: "A title", Duration: 120, Heatmap: []float64{1, 0.5, 0}}
+
+	p, err := Start([]media.Video{v}, config.Default(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	folder := p.workDir
+	if folder == "" {
+		t.Fatal("the files of the controls need a folder")
+	}
+	if p.Socket() != "" {
+		t.Error("without ControlSocket there is no socket")
+	}
+	_ = p.Wait()
+
+	data, _ := os.ReadFile(out)
+	args := string(data)
+
+	for _, want := range []string{"--osc=no\n", "--osd-bar=no\n", "--script=", "/ytwatch-ui.lua\n", "--script-opts-append=ytwatch-ui-data=", "/ytwatch-ui.json\n"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("missing %q in:\n%s", want, args)
+		}
+	}
+	if _, err := os.Stat(folder); !os.IsNotExist(err) {
+		t.Errorf("the folder must be removed when mpv ends: %v", err)
+	}
+}
+
+func TestStartKeepsTheControlsOfMpvWhenAsked(t *testing.T) {
+	out := fakeMPV(t)
+	cfg := config.Default()
+	cfg.MPV.UI = "mpv"
+
+	p, err := Start([]media.Video{{ID: "video0001", Title: "A"}}, cfg, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = p.Wait()
+
+	data, _ := os.ReadFile(out)
+	for _, bad := range []string{"--osc=no", "ytwatch-ui", "--osd-bar=no"} {
+		if strings.Contains(string(data), bad) {
+			t.Errorf("ui = mpv must leave the controls alone, found %q:\n%s", bad, data)
+		}
+	}
+	if p.workDir != "" {
+		t.Error("no controls and no socket need no folder")
+	}
+}
+
+func TestStartSharesOneFolderForTheSocketAndTheControls(t *testing.T) {
+	fakeMPV(t)
+
+	p, err := Start([]media.Video{{ID: "video0001", Title: "A"}}, config.Default(), Options{ControlSocket: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Wait()
+
+	if filepath.Dir(p.Socket()) != p.workDir || !strings.HasPrefix(filepath.Base(p.workDir), "ytwatch-mpv-") {
+		t.Errorf("socket = %q, folder = %q", p.Socket(), p.workDir)
+	}
+	info, err := os.Stat(p.workDir)
+	if err != nil || info.Mode().Perm() != 0o700 {
+		t.Errorf("the folder must be for the user only: %v, %v", info, err)
+	}
+}
+
+func TestStartPlaysWithMpvsOwnControlsWhenTheFolderCannotBeUsed(t *testing.T) {
+	out := fakeMPV(t)
+	t.Setenv("TMPDIR", t.TempDir()+"/with,comma") // mpv options are split at commas
+	if err := os.MkdirAll(os.Getenv("TMPDIR"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	p, err := Start([]media.Video{{ID: "video0001", Title: "A"}}, config.Default(), Options{})
+	if err != nil {
+		t.Fatalf("the video must play even then: %v", err)
+	}
+	_ = p.Wait()
+
+	data, _ := os.ReadFile(out)
+	if strings.Contains(string(data), "--osc=no") || strings.Contains(string(data), "ytwatch-ui") {
+		t.Errorf("with a folder mpv cannot be told about, mpv keeps its controls:\n%s", data)
+	}
+}
+
+func TestUIInputOfOneVideoAndOfAQueue(t *testing.T) {
+	v := media.Video{ID: "a", Title: "T", Duration: 90, Heatmap: []float64{1, 0}, StoryboardSpec: "spec"}
+
+	got := uiInput([]media.Video{v})
+	if got.Title != "T" || got.Duration != 90*time.Second || len(got.Heatmap) != 2 || got.StoryboardSpec != "spec" {
+		t.Errorf("one video: %+v", got)
+	}
+
+	if got := uiInput([]media.Video{v, v}); got.Title != "" || got.Heatmap != nil || got.StoryboardSpec != "" {
+		t.Errorf("a queue has no data of its own: %+v", got)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/geovannewashington/ytwatch/internal/config"
+	"github.com/geovannewashington/ytwatch/internal/player"
 	"github.com/geovannewashington/ytwatch/internal/preview"
 	"github.com/geovannewashington/ytwatch/internal/resume"
 	"github.com/geovannewashington/ytwatch/internal/tui"
@@ -107,6 +108,10 @@ func main() {
 	model := tui.New(query)
 	model.SetKitty(preview.NewKitty(terminal, os.Getenv("TMUX") != ""), detected)
 	model.SetConfig(cfg)
+
+	// mpv may have kept playing after an earlier ytwatch quit, so nobody
+	// removed its folder in the temp folder: a day later it is surely over.
+	player.SweepStale(24*time.Hour, time.Now())
 
 	// mpv remembers where each video was left, in a folder of ytwatch, and the
 	// old positions are deleted when they are older than the history is kept.

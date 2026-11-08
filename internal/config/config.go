@@ -163,6 +163,10 @@ type MPV struct {
 	Subtitles string
 	// AutoSubtitles also uses YouTube's automatic captions for Subtitles.
 	AutoSubtitles bool
+	// UI is "ytwatch" (the default) for the controls of ytwatch, which look
+	// like those of YouTube, or "mpv" to keep the controls of mpv, for a user
+	// who has their own.
+	UI string
 }
 
 // ParseSubtitleLanguages checks a list of subtitle languages such as
@@ -208,6 +212,7 @@ type Chat struct {
 func Default() Config {
 	return Config{
 		General:  General{Quality: quality.Best},
+		MPV:      MPV{UI: "ytwatch"},
 		Chat:     Chat{Enabled: true},
 		Download: Download{Dir: "~/Downloads/ytwatch"},
 		History:  History{Enabled: true, MaxAgeDays: 30, MaxEntries: 100, Resume: true},
@@ -344,6 +349,16 @@ func (c *Config) set(section, key, raw string) error {
 		var value string
 		if value, err = parseString(raw); err == nil {
 			c.MPV.Subtitles, err = ParseSubtitleLanguages(value)
+		}
+	case "mpv.ui":
+		var value string
+		if value, err = parseString(raw); err == nil {
+			switch value = strings.ToLower(strings.TrimSpace(value)); value {
+			case "ytwatch", "mpv":
+				c.MPV.UI = value
+			default:
+				err = fmt.Errorf("invalid ui %q (ytwatch, mpv)", value)
+			}
 		}
 	case "mpv.auto_subtitles":
 		c.MPV.AutoSubtitles, err = strconv.ParseBool(raw)

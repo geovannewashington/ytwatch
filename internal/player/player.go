@@ -18,6 +18,7 @@ import (
 
 	"github.com/geovannewashington/ytwatch/internal/config"
 	"github.com/geovannewashington/ytwatch/internal/media"
+	"github.com/geovannewashington/ytwatch/internal/mpvui"
 	"github.com/geovannewashington/ytwatch/internal/quality"
 	"github.com/geovannewashington/ytwatch/internal/wm"
 )
@@ -44,18 +45,37 @@ type Process struct {
 
 	cancelled atomic.Bool // set by Cancel, read by Wait in another goroutine
 
-	// socketDir holds mpv's control socket, see Options.ControlSocket. It is
-	// removed when mpv ends while ytwatch runs.
-	socketDir string
+	// workDir is a folder only the user can open. It holds mpv's control socket
+	// (see Options.ControlSocket) and the files of the controls (see package
+	// mpvui). It is removed when mpv ends while ytwatch runs.
+	workDir   string
+	hasSocket bool // mpv listens on a socket in workDir
+
+	// stopUI ends the download of the pictures of the seek bar, and uiDone is
+	// closed when it is over. Both are nil without the controls of ytwatch.
+	stopUI context.CancelFunc
+	uiDone <-chan struct{}
 }
 
 // Socket is the path of mpv's control socket, or "" when it has none.
 func (p *Process) Socket() string {
-	if p.socketDir == "" {
+	if p.workDir == "" || !p.hasSocket {
 		return ""
 	}
 
-	return filepath.Join(p.socketDir, socketName)
+	return filepath.Join(p.workDir, socketName)
+}
+
+// cleanUp ends the downloads of the controls, and removes the folder once
+// nothing writes to it.
+func (p *Process) cleanUp() {
+	if p.stopUI != nil {
+		p.stopUI()
+		<-p.uiDone
+	}
+	if p.workDir != "" {
+		_ = os.RemoveAll(p.workDir)
+	}
 }
 
 // ErrCancelled is returned by Wait after Cancel stopped mpv.
@@ -87,9 +107,7 @@ func (p *Process) Wait() error {
 	err := p.cmd.Wait()
 	output := tail(p.out)
 	p.out.Close()
-	if p.socketDir != "" {
-		_ = os.RemoveAll(p.socketDir)
-	}
+	p.cleanUp()
 
 	if p.cancelled.Load() {
 		return ErrCancelled
@@ -186,6 +204,24 @@ type Options struct {
 func IsForbidden(err error) bool {
 	var f *Failure
 	return errors.As(err, &f) && strings.Contains(f.Reason, "HTTP 403")
+}
+
+// uiInput is what the controls know about the videos that play: for one video
+// its title and length, the "most replayed" graph and the pictures of the seek
+// bar. Several videos share one mpv, which shows the title of the one that plays.
+func uiInput(videos []media.Video) mpvui.Input {
+	if len(videos) != 1 {
+		return mpvui.Input{}
+	}
+
+	v := videos[0]
+
+	return mpvui.Input{
+		Title:          v.Title,
+		Duration:       time.Duration(v.Duration * float64(time.Second)),
+		Heatmap:        v.Heatmap,
+		StoryboardSpec: v.StoryboardSpec,
+	}
 }
 
 // subtitleArgs are the mpv arguments for the subtitle languages of the config.
@@ -321,17 +357,41 @@ func Start(videos []media.Video, cfg config.Config, opts Options) (*Process, err
 	}
 	args = append(args, subtitleArgs(cfg.MPV)...)
 	args = append(args, resumeArgs(opts)...)
-	args = append(args, cfg.MPV.Args...)
 
-	// The socket is in a directory only the user can open, because whoever
-	// can write to mpv's socket can make mpv run commands.
-	var socketDir string
-	if opts.ControlSocket {
-		if socketDir, err = os.MkdirTemp("", "ytwatch-ipc-"); err != nil {
-			return nil, fmt.Errorf("create mpv socket: %w", err)
+	// The control socket and the files of the controls are in a folder only the
+	// user can open: whoever can write to mpv's socket can make mpv run
+	// commands, and the folder has the script that mpv runs.
+	var workDir string
+	var stopUI context.CancelFunc
+	var uiDone <-chan struct{}
+	wantUI := cfg.MPV.UI != "mpv"
+
+	if opts.ControlSocket || wantUI {
+		if workDir, err = os.MkdirTemp("", "ytwatch-mpv-"); err != nil {
+			return nil, fmt.Errorf("create mpv folder: %w", err)
 		}
-		args = append(args, "--input-ipc-server="+filepath.Join(socketDir, socketName))
 	}
+	if opts.ControlSocket {
+		socket := filepath.Join(workDir, socketName)
+		if len(socket) > maxSocketPath {
+			_ = os.RemoveAll(workDir)
+
+			return nil, errors.New("the temp folder path is too long for mpv's control socket")
+		}
+		args = append(args, "--input-ipc-server="+socket)
+	}
+	if wantUI {
+		ctx, cancel := context.WithCancel(context.Background())
+		uiArgs, done, uiErr := mpvui.Prepare(ctx, workDir, uiInput(videos))
+		if uiErr != nil {
+			cancel() // mpv keeps its own controls
+		} else {
+			args = append(args, uiArgs...)
+			stopUI, uiDone = cancel, done
+		}
+	}
+
+	args = append(args, cfg.MPV.Args...)
 
 	cmd := exec.Command(path, append(args, append([]string{"--"}, urls...)...)...)
 	cmd.Stdin = nil
@@ -341,6 +401,14 @@ func Start(videos []media.Video, cfg config.Config, opts Options) (*Process, err
 	// continue after ytwatch quits.
 	out, err := os.CreateTemp("", "ytwatch-mpv-*")
 	if err != nil {
+		if stopUI != nil {
+			stopUI()
+			<-uiDone
+		}
+		if workDir != "" {
+			_ = os.RemoveAll(workDir)
+		}
+
 		return nil, fmt.Errorf("create mpv log: %w", err)
 	}
 	os.Remove(out.Name())
@@ -351,8 +419,12 @@ func Start(videos []media.Video, cfg config.Config, opts Options) (*Process, err
 	before := wm.Snapshot(backend)
 	if err := cmd.Start(); err != nil {
 		out.Close()
-		if socketDir != "" {
-			_ = os.RemoveAll(socketDir)
+		if stopUI != nil {
+			stopUI()
+			<-uiDone
+		}
+		if workDir != "" {
+			_ = os.RemoveAll(workDir)
 		}
 
 		return nil, fmt.Errorf("launch mpv: %w", err)
@@ -365,7 +437,7 @@ func Start(videos []media.Video, cfg config.Config, opts Options) (*Process, err
 		windowPlaced()
 	}()
 
-	return &Process{cmd: cmd, out: out, socketDir: socketDir}, nil
+	return &Process{cmd: cmd, out: out, workDir: workDir, hasSocket: opts.ControlSocket, stopUI: stopUI, uiDone: uiDone}, nil
 }
 
 func OpenYouTubeChat(v media.Video, cfg config.Config) error {
