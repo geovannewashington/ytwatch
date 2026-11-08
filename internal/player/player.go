@@ -2,6 +2,7 @@ package player
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -10,8 +11,10 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/geovannewashington/ytwatch/internal/config"
 	"github.com/geovannewashington/ytwatch/internal/media"
@@ -167,6 +170,12 @@ type Options struct {
 	// errors some videos give with the default client, but costs about 0.8
 	// seconds of start time, so it is only used to retry after a 403.
 	WebSafari bool
+	// ResumeDir is the folder where mpv keeps the position of each video it
+	// stops in, so the video starts there next time. Empty turns it off. See
+	// package resume.
+	ResumeDir string
+	// StartOver makes mpv ignore a saved position, to play from the start.
+	StartOver bool
 	// ControlSocket makes mpv listen on a private socket, so that ytwatch can
 	// ask it for the playback time (see PlaybackTime). Only the chat replay
 	// needs it.
@@ -201,6 +210,57 @@ func subtitleArgs(mpv config.MPV) []string {
 	}
 
 	return args
+}
+
+// resumeArgs are the mpv arguments that save the position of a video and start
+// from it. mpv writes a "watch later" file when it quits, deletes it when the
+// video ends, and reads it the next time. The address goes in the first line of
+// the file, so ytwatch can tell which video it is. Only the position is saved:
+// the default also saves the volume and the audio and subtitle tracks, and the
+// subtitle language of the config must stay the one that is used.
+func resumeArgs(opts Options) []string {
+	if opts.ResumeDir == "" {
+		return nil
+	}
+
+	args := []string{
+		"--save-position-on-quit",
+		"--watch-later-directory=" + opts.ResumeDir,
+		"--write-filename-in-watch-later-config",
+	}
+	if mpvKnows("--watch-later-options") {
+		args = append(args, "--watch-later-options=start")
+	}
+	if opts.StartOver {
+		args = append(args, "--no-resume-playback")
+	}
+
+	return args
+}
+
+var (
+	knownOptionsOnce sync.Once
+	knownOptions     string
+)
+
+// mpvKnows reports whether the mpv that is installed has an option. An mpv
+// stops at an option it does not know, so an option that old versions lack is
+// only used when it is there.
+var mpvKnows = func(option string) bool {
+	knownOptionsOnce.Do(func() {
+		path, err := exec.LookPath("mpv")
+		if err != nil {
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		out, _ := exec.CommandContext(ctx, path, "--list-options").Output()
+		knownOptions = string(out)
+	})
+
+	return strings.Contains(knownOptions, option+" ") || strings.Contains(knownOptions, option+"\n")
 }
 
 // Start opens videos in one mpv. Several videos make a queue that mpv steps
@@ -260,6 +320,7 @@ func Start(videos []media.Video, cfg config.Config, opts Options) (*Process, err
 		args = append(args, "--ytdl-raw-options-append=cookies-from-browser="+cfg.MPV.CookiesFromBrowser)
 	}
 	args = append(args, subtitleArgs(cfg.MPV)...)
+	args = append(args, resumeArgs(opts)...)
 	args = append(args, cfg.MPV.Args...)
 
 	// The socket is in a directory only the user can open, because whoever

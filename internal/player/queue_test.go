@@ -3,7 +3,9 @@ package player
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/geovannewashington/ytwatch/internal/config"
@@ -133,5 +135,69 @@ func TestStartPassesTheSubtitleLanguages(t *testing.T) {
 		if !strings.Contains(string(data), want+"\n") {
 			t.Errorf("mpv must get %q as one argument:\n%s", want, data)
 		}
+	}
+}
+
+func TestResumeArgs(t *testing.T) {
+	old := mpvKnows
+	t.Cleanup(func() { mpvKnows = old })
+
+	mpvKnows = func(string) bool { return true }
+	if got := resumeArgs(Options{}); got != nil {
+		t.Errorf("off by default: %q", got)
+	}
+
+	got := strings.Join(resumeArgs(Options{ResumeDir: "/state/watch_later"}), "\n")
+	for _, want := range []string{"--save-position-on-quit", "--watch-later-directory=/state/watch_later",
+		"--write-filename-in-watch-later-config", "--watch-later-options=start"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "resume-playback") {
+		t.Errorf("a normal play resumes:\n%s", got)
+	}
+
+	if got := resumeArgs(Options{ResumeDir: "/d", StartOver: true}); !slices.Contains(got, "--no-resume-playback") {
+		t.Errorf("starting over must not resume: %q", got)
+	}
+
+	// An mpv that does not know the option must not be given it: it would stop.
+	mpvKnows = func(string) bool { return false }
+	if got := resumeArgs(Options{ResumeDir: "/d"}); slices.Contains(got, "--watch-later-options=start") {
+		t.Errorf("an old mpv does not know --watch-later-options: %q", got)
+	}
+}
+
+func TestStartPassesTheResumeArguments(t *testing.T) {
+	old := mpvKnows
+	t.Cleanup(func() { mpvKnows = old })
+	mpvKnows = func(string) bool { return true }
+
+	out := fakeMPV(t)
+	p, err := Start([]media.Video{{ID: "video0001", Title: "A"}}, config.Default(), Options{ResumeDir: "/state/wl"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = p.Wait()
+
+	data, _ := os.ReadFile(out)
+	if !strings.Contains(string(data), "--watch-later-directory=/state/wl\n") || !strings.Contains(string(data), "--save-position-on-quit\n") {
+		t.Errorf("args:\n%s", data)
+	}
+}
+
+func TestMpvKnowsReadsTheOptionList(t *testing.T) {
+	dir := t.TempDir()
+	list := "#!/bin/sh\nprintf ' --watch-later-options            String list (default: start)\\n --save-position-on-quit          Flag\\n'\n"
+	if err := os.WriteFile(filepath.Join(dir, "mpv"), []byte(list), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	knownOptionsOnce, knownOptions = sync.Once{}, ""
+	t.Cleanup(func() { knownOptionsOnce, knownOptions = sync.Once{}, "" })
+
+	if !mpvKnows("--watch-later-options") || !mpvKnows("--save-position-on-quit") || mpvKnows("--watch-later") || mpvKnows("--nothing") {
+		t.Error("an option is known only when it is a whole name in the list")
 	}
 }

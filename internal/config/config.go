@@ -92,7 +92,14 @@ type History struct {
 	Enabled    bool
 	MaxAgeDays int
 	MaxEntries int
+	// Resume makes mpv remember where the user stopped in each video, and
+	// start there the next time. It follows Enabled: with the history off,
+	// nothing is remembered. The positions are kept MaxAgeDays days.
+	Resume bool
 }
+
+// Resumes tells whether the position in the videos is remembered.
+func (h History) Resumes() bool { return h.Enabled && h.Resume }
 
 // UI configures how the interface moves. Animations is "full" (the default),
 // "minimal" (only the ones that show progress) or "off".
@@ -203,7 +210,7 @@ func Default() Config {
 		General:  General{Quality: quality.Best},
 		Chat:     Chat{Enabled: true},
 		Download: Download{Dir: "~/Downloads/ytwatch"},
-		History:  History{Enabled: true, MaxAgeDays: 30, MaxEntries: 100},
+		History:  History{Enabled: true, MaxAgeDays: 30, MaxEntries: 100, Resume: true},
 		Cache:    Cache{MaxAgeDays: 7, MaxSizeMB: 100},
 		UI:       UI{Animations: "full"},
 	}
@@ -365,6 +372,8 @@ func (c *Config) set(section, key, raw string) error {
 		c.History.MaxAgeDays, err = parseBoundedInt(raw, 36500) // about 100 years
 	case "history.max_entries":
 		c.History.MaxEntries, err = parseBoundedInt(raw, 100000)
+	case "history.resume":
+		c.History.Resume, err = strconv.ParseBool(raw)
 
 	case "ui.animations":
 		var value string

@@ -340,3 +340,25 @@ func TestParseSubtitlesErrors(t *testing.T) {
 		t.Error("a boolean is expected")
 	}
 }
+
+func TestParseHistoryResume(t *testing.T) {
+	def, _ := Parse("")
+	if !def.History.Resume || !def.History.Resumes() {
+		t.Errorf("positions are remembered by default: %+v", def.History)
+	}
+
+	off, err := Parse("[history]\nresume = false")
+	if err != nil || off.History.Resumes() {
+		t.Errorf("resume = false: %+v, %v", off.History, err)
+	}
+
+	// The history off means that nothing about what was watched is kept.
+	noHistory, _ := Parse("[history]\nenabled = false")
+	if noHistory.History.Resumes() {
+		t.Error("with the history off, no position is remembered")
+	}
+
+	if _, err := Parse("[history]\nresume = maybe"); err == nil {
+		t.Error("a boolean is expected")
+	}
+}
