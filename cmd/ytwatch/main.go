@@ -51,6 +51,12 @@ func main() {
 		return
 	}
 
+	// "ytwatch update" and "ytwatch update --check" only: a search that starts
+	// with the word, such as "ytwatch update ubuntu", is still a search.
+	if len(args) > 0 && args[0] == "update" && (len(args) == 1 || len(args) == 2 && args[1] == "--check") {
+		os.Exit(runUpdate(args[1:], versionString(), os.Stdout, os.Stderr))
+	}
+
 	installOnly := len(args) == 2 && args[1] == "--install-command"
 	if (len(args) == 1 || installOnly) && (args[0] == "doctor" || args[0] == "--doctor") {
 		cfg, err := config.Load()

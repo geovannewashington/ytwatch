@@ -16,8 +16,24 @@ script is short, so you can [read it first](../install.sh). Options: `--yes` run
 the install command without asking, `--no-deps` installs only ytwatch, and
 `VERSION=v0.1.0` picks a release.
 
-**Update:** run the same command again. It installs the latest release and
-checks its checksum.
+## Update
+
+```sh
+ytwatch update           # install the latest release
+ytwatch update --check   # only say if there is a newer one
+```
+
+It asks GitHub for the latest release, downloads it over https, checks its
+SHA-256 against `checksums.txt` of that release, and replaces the program in
+one step, so nothing is left half written. It talks to GitHub only when you run
+it: ytwatch never checks for updates by itself.
+
+The checksum catches a broken download. It does not protect against someone
+who controls the release itself.
+
+It needs write access to the folder of the program. If you have a build from a
+checkout, use `git pull && make install`. The install script above also
+works for updating.
 
 ## Other ways
 

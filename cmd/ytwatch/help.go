@@ -61,6 +61,7 @@ func usageText(version string, r *lipgloss.Renderer, t theme.Theme) string {
 		{"USAGE", []helpRow{
 			{"ytwatch [search query]", "open ytwatch and search right away"},
 			{"ytwatch doctor", "check the programs and the session ytwatch uses"},
+			{"ytwatch update", "install the latest release (--check: only look)"},
 			{"ytwatch --version", "print the version"},
 		}},
 		{"EXAMPLES", []helpRow{

@@ -59,7 +59,8 @@ curl -fsSL https://github.com/geovannewashington/ytwatch/releases/latest/downloa
 ```
 
 It checks the SHA-256 checksum of the download and asks before it installs
-anything else. To update, run it again. Other ways (Go, by hand, from source)
+anything else. To update later, run `ytwatch update` (`--check` only looks).
+Other ways (Go, by hand, from source)
 and the other programs are in [docs/install.md](docs/install.md).
 
 ytwatch needs `yt-dlp`, `mpv`, `ffmpeg` and a browser. Run `ytwatch doctor` to
@@ -86,10 +87,14 @@ mpv keeps playing if you quit ytwatch.
 
 ## Privacy
 
-No account, no telemetry. ytwatch talks only to YouTube's servers: `youtube.com`,
-`i.ytimg.com` and `googlevideo.com` (directly and through `yt-dlp` and `mpv`),
-and `ggpht.com` and `fonts.gstatic.com` for the pictures of the chat page. It keeps your search history and where you stopped
-in each video for 30 days, and thumbnails for 7. Both can be turned off. See
+No account, no telemetry. ytwatch talks only to YouTube's servers:
+`youtube.com`, `i.ytimg.com` and `googlevideo.com` (directly and through
+`yt-dlp` and `mpv`), and `ggpht.com` and `fonts.gstatic.com` for the pictures
+of the chat page. The one other place is GitHub, and only when you run
+`ytwatch update`: it never checks by itself.
+
+It keeps your search history and where you stopped in each video for 30 days,
+and thumbnails for 7. Both can be turned off. See
 [Cookies](docs/troubleshooting.md#cookies) for the one setting that reads
 browser data.
 
