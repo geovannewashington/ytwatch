@@ -38,7 +38,7 @@ func planInstall(missing []string, wayland bool, lookPath func(string) (string, 
 
 	return installPlan{notes: []string{
 		"Install with your package manager: " + strings.Join(missing, ", "),
-		"(ytwatch knows pacman and apt; see the README for other systems.)",
+		"(ytwatch knows pacman and apt; see docs/install.md for other systems.)",
 	}}
 }
 

@@ -1443,7 +1443,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		next := theme.Next(m.themeName)
 		ApplyTheme(next)
 		m.themeName = next.Name
-		m.status = "Theme " + next.Name + noteMark + "not saved, see [theme] in the README"
+		m.status = "Theme " + next.Name + noteMark + "not saved, see [theme] in docs/configuration.md"
 
 		return nil
 
@@ -3016,7 +3016,7 @@ func (m *Model) handleQualityKey(msg tea.KeyMsg) {
 	case "enter":
 		m.showQuality = false
 		m.quality = quality.Levels[m.qualityDraft]
-		m.status = "Quality " + m.quality + noteMark + "not saved, see [general] in the README"
+		m.status = "Quality " + m.quality + noteMark + "not saved, see [general] in docs/configuration.md"
 		m.showSelectedThumbnail()
 
 	case "esc", "q", "Q":

@@ -2,7 +2,8 @@
 
 <img src="docs/logo/wordmark.svg" width="380" alt="ytwatch">
 
-Search YouTube from your terminal. Watch on purpose.
+Search and watch YouTube from your terminal.<br>
+No feed, no recommendations, no autoplay.
 
 [![CI](https://github.com/geovannewashington/ytwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/geovannewashington/ytwatch/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/geovannewashington/ytwatch)](https://github.com/geovannewashington/ytwatch/releases/latest)
@@ -16,260 +17,88 @@ Search YouTube from your terminal. Watch on purpose.
 
 ## Why
 
-ytwatch is for finding a video, watching it, and leaving. There is no home
-page, no recommendations, no account, no comments and no likes. It does not
-manage subscriptions either: an RSS reader such as
-[Newsraft](https://codeberg.org/newsraft/newsraft) already does that well, and
-ytwatch fills the gap it leaves, which is finding new, ordinary content on
-purpose. (The idea comes from Newsraft.) Want the comments? Press `o` to open
-the video, or `3o` for a link in its description, in your browser.
+Even logged out, youtube.com gives you a home feed, suggestions, autoplay and
+Shorts. ytwatch has none of that: you search for what you want, watch it, and
+leave. No account, no comments, no likes. Want the comments? `o` opens the
+video in your browser.
 
-It also stays light: [yt-dlp](https://github.com/yt-dlp/yt-dlp) searches,
-[mpv](https://mpv.io) plays, and no browser runs.
+It is also light. [yt-dlp](https://github.com/yt-dlp/yt-dlp) searches,
+[mpv](https://mpv.io) plays, and no browser window stays open while you watch.
+A browser is still needed for the chat, for links, and for the cookies that
+YouTube soon asks for (see [Cookies](docs/troubleshooting.md#cookies)). On a
+tiling window manager the video opens on a workspace you choose, away from
+your work.
+
+ytwatch does not manage subscriptions: an RSS reader such as
+[Newsraft](https://codeberg.org/newsraft/newsraft) does that well. ytwatch is
+for finding new, ordinary content on purpose.
 
 ## Features
 
 - **One search for everything:** videos, Shorts, live streams and playlists,
-  with filters for type, duration and date, and a language and region of
-  your choice.
-- **Thumbnails** beside every result. kitty and Ghostty get sharp images from
-  the kitty graphics protocol, and any other terminal gets coloured
-  half-blocks, with nothing to install. The optional `ueberzugpp` adds real
-  images on Wayland, X11 and in terminals like Alacritty and foot that have no
-  image protocol of their own.
-- **Full live stream support.** Live streams are marked, and their chat opens
-  next to the video. Past live streams are marked too, so you can tell a
-  recording (VOD) from a normal upload, which YouTube itself does not show.
-  A recording with a chat replay opens it in the chat window too: ytwatch
-  serves a small page on `127.0.0.1` that follows the time of the video in mpv,
-  with profile pictures, member and moderator badges, emoji and Super Chats.
-- **Player controls like YouTube's:** mpv gets a red progress bar with the
-  buffered part, the "most replayed" graph and a small picture of the video
-  under the mouse (for videos that have them), a title, and volume, speed,
-  subtitles and full screen buttons, and everything fades when the mouse rests.
-- **Pick up where you left off:** a video you stopped halfway shows a progress
-  thin red bar in the list and starts from there the next time (`s` plays it from the
-  start). A video seen to its end starts over.
-- **Playlists:** `Enter` plays the whole playlist, `B` opens it to pick videos.
-- **Queue and download:** select several results with `V`, then play them in one
-  mpv or download them. Choose the quality, or audio only.
-- **Window placement:** mpv and chat windows go to the workspace you choose on
-  sway, i3, Hyprland, niri, bspwm and other X11 window managers.
-- **Made for Vim users:** `hjkl`, `gg`, `G`, counts like `5j`, `Ctrl+d`, and `V`
-  for line selection.
-- **Share a video** by yanking its link with `y`.
-- **Paste a link:** a YouTube link to a video or a playlist in the search line
-  opens it, without a search.
-- **Rice-friendly:** 8 color themes, any color can be changed, and the
-  `terminal` theme follows your terminal palette (pywal and similar tools).
-- **Undo a mistake:** `u` (or `Esc`) cancels the last play or download for
-  10 seconds.
-- **Tidy by default:** history and thumbnails are cached for speed, then deleted
-  (30 days and 7 days) so they never grow without limit.
+  with filters. Paste a YouTube link to open it directly.
+- **Thumbnails** in any terminal: sharp in kitty and Ghostty, half-blocks
+  elsewhere, real images with the optional `ueberzugpp`.
+- **Live chat**, also the chat replay of past streams, with pictures, badges,
+  emoji and Super Chats.
+- **Player controls like YouTube's:** red progress bar, "most replayed" graph,
+  hover thumbnails, speed, volume and subtitles (`[mpv] subtitles = "en"`).
+- **Pick up where you left off:** a thin red bar in the list, and the video
+  starts from there. `s` plays it from the start.
+- **Links in the description:** `3o` opens link 3, `1y` copies link 1. The idea
+  comes from [Newsraft](https://codeberg.org/newsraft/newsraft).
+- **Queue and download:** select several results with `V`, then play or
+  download them, as video or audio only.
+- **Made for Vim users, and rice-friendly:** `hjkl`, counts like `5j`, 8 color
+  themes (catppuccin by default) and a `terminal` theme that follows pywal.
 
 ## Install
-
-ytwatch is for Linux, on Wayland or X11, on x86-64 or ARM64. Other systems are
-untested.
-
-**One command:**
 
 ```sh
 curl -fsSL https://github.com/geovannewashington/ytwatch/releases/latest/download/install.sh | sh
 ```
 
-It downloads the latest release, checks its SHA-256 checksum, puts `ytwatch` in
-`~/.local/bin`, and shows the command that installs the programs ytwatch needs.
-It asks before running that command, and uses `sudo` only if you say yes. The
-script is short, so you can [read it first](install.sh). Options: `--yes` runs
-the install command without asking, `--no-deps` installs only ytwatch, and
-`VERSION=v0.1.0` picks a release.
+It checks the SHA-256 checksum of the download and asks before it installs
+anything else. To update, run it again. Other ways (Go, by hand, from source)
+and the other programs are in [docs/install.md](docs/install.md).
 
-**Other ways**
-
-- **With Go 1.23+:** `go install github.com/geovannewashington/ytwatch/cmd/ytwatch@latest`
-  (installs to `~/go/bin`).
-- **By hand:** download the `.tar.gz` for your system and `checksums.txt` from the
-  [releases page](https://github.com/geovannewashington/ytwatch/releases), check
-  it with `sha256sum -c --ignore-missing checksums.txt`, and move `ytwatch` to a
-  folder in your `PATH`.
-- **From source:** `git clone https://github.com/geovannewashington/ytwatch.git`,
-  then `cd ytwatch && make install` (needs Go 1.23+; installs to `~/.local/bin`).
-
-### Programs ytwatch needs
-
-All of these are required. Run `ytwatch doctor` to check them: it also prints the
-command that installs what is missing.
-
-| Program | Used for |
-|---|---|
-| `yt-dlp` | searching and downloading. Keep it up to date, because YouTube changes often |
-| `mpv` | playing |
-| `ffmpeg` | merging video and audio in downloads. Without it you get two separate files |
-| `ueberzugpp` (optional) | sharp thumbnails outside kitty and Ghostty. Without it they are half-blocks |
-| a web browser | links and the live chat |
-| `wl-clipboard` (Wayland) or `xclip` / `xsel` (X11) | copying links |
-| `wmctrl` | moving windows to a workspace on X11 (not needed on i3) |
-
-On Arch Linux:
-
-```sh
-sudo pacman -S yt-dlp mpv ffmpeg ueberzugpp wl-clipboard
-```
-
-On Debian and Ubuntu the packaged `yt-dlp` is too old for YouTube: use
-`pipx install yt-dlp`.
+ytwatch needs `yt-dlp`, `mpv`, `ffmpeg` and a browser. Run `ytwatch doctor` to
+check them: it prints the command that installs what is missing.
 
 ## Usage
 
 ```sh
 ytwatch                  # opens with the search line active
 ytwatch "Go interfaces"  # opens with a search
-ytwatch "https://youtu.be/dQw4w9WgXcQ"  # opens a video or playlist link
 ```
-
-mpv keeps playing if you quit ytwatch. Press `?` for help.
 
 | Key | Action |
 |---|---|
-| `/` `r` | Edit the search (`Up` `Down` for past ones) / repeat it |
+| `/` | Search (`r` repeats it, `f` sets filters) |
 | `j` `k` `h` `l` | Move / switch between results and preview |
-| `Enter` `B` | Play (a whole playlist too) / browse a playlist |
-| `s` | Play from the start a video that was left halfway |
+| `Enter` `s` | Play / play from the start |
 | `V` | Select several results, then `Enter` plays and `d` downloads them |
 | `d` `a` `Q` | Download / audio only / quality |
-| `f` | Filters: type, duration, date. A new search clears them, `r` keeps them |
-| `o` `y` | Open / copy the video link. With a number (`3o`): description link 3 |
-| `u` | Undo the last play or download |
-| `t` | Next color theme |
-| `Esc` `q` | Back, then quit (both ask first) |
+| `o` `y` | Open / copy the link (`3o`: description link 3) |
+| `?` `q` | Help with all keys / quit |
 
-## Configuration
-
-The file is `~/.config/ytwatch/config.toml` (`$XDG_CONFIG_HOME` is respected).
-Every option is below with its default, so you can copy it as it is. A mistake
-stops ytwatch at start with an error that names the line.
-
-```toml
-[general]
-browser = ""                  # command for o and chat; empty: $BROWSER, then the desktop default
-audio_only = false
-quality = "best"              # best, 1080p, 720p, 480p, 360p
-
-[mpv]
-workspace = ""                # move mpv windows here; empty: leave them where the WM puts them
-args = []                     # extra mpv arguments, for example ["--volume=60"]
-cookies_from_browser = ""     # for example "firefox"; read "Cookies" below
-ui = "ytwatch"                # "ytwatch": controls like YouTube's; "mpv": keep mpv's own (or your uosc)
-subtitles = ""                # languages in order of preference, as YouTube names them: "en,pt-BR"; empty: none (j cycles in mpv)
-auto_subtitles = false        # also use YouTube's automatic captions for those languages
-
-[chat]
-enabled = true                # open the chat of live streams and replays
-workspace = ""                # empty: the same as mpv
-browser = ""                  # empty: general.browser
-
-[download]
-dir = "~/Downloads/ytwatch"
-args = []                     # extra yt-dlp arguments, for example ["--embed-metadata"]
-
-[theme]
-name = "catppuccin"           # everforest, gruvbox, nord, tokyonight, rose-pine, dracula, terminal
-# accent = "#a6e3a1"          # any color: accent, secondary, live, short, vod, muted, subtle, border, error
-
-[preview]
-output = "auto"               # auto, off, kitty, halfblocks, ueberzugpp, x11, wayland, sixel, iterm2, chafa
-# auto: kitty in kitty and Ghostty, else ueberzugpp if installed, else halfblocks
-
-[search]
-language = "en"               # a code such as en, pt-BR or ja; empty: YouTube decides
-region = "US"                 # a two-letter country code; empty: YouTube decides
-hide = []                     # never show: shorts, playlists, live, upcoming, vods
-
-[history]
-enabled = true
-max_age_days = 30             # also how long the place in a video is remembered
-max_entries = 100
-resume = true                 # remember where you stopped in each video (needs enabled = true)
-
-[cache]                       # thumbnails
-max_age_days = 7
-max_size_mb = 100
-
-[ui]
-animations = "full"           # full, minimal (only progress) or off
-
-# Open description links (3o) with a program. The command runs without a
-# shell and %l is the link. Links without a match open in the browser.
-# [link.images]
-# match = '\.(png|jpe?g|gif|webp)(\?.*)?$'
-# command = ["nsxiv", "%l"]
-```
-
-Workspace names follow your window manager: a name or number for sway, i3 and
-niri, `3` or `name:video` for Hyprland, `^2` for bspwm, a number from 1 for
-`wmctrl`.
-
-While a video plays, its script, data and the small pictures of the seek bar are
-in a private folder `ytwatch-mpv-*` of the temporary folder, removed when mpv
-ends. Other files: search history in `~/.local/state/ytwatch/history`, the place where
-you stopped in each video in `~/.local/state/ytwatch/watch_later` (mpv writes
-them, and your own mpv files are left alone), thumbnails in
-`~/.cache/ytwatch/thumbnails`.
+mpv keeps playing if you quit ytwatch.
 
 ## Privacy
 
-ytwatch has no account, no telemetry and no analytics. It talks to YouTube's
-servers (`youtube.com` and `i.ytimg.com` for searches and thumbnails, and
-`googlevideo.com` for the video itself), directly and through `yt-dlp` and
-`mpv`, and to nobody else. The chat replay page also loads the profile
-pictures, badges and emoji of the chat in your browser, from YouTube's image
-servers only (`*.ggpht.com` and `fonts.gstatic.com`), without telling them
-which page asked. On your disk it keeps a history of your searches and the
-place where you stopped in each video (30 days) and a cache of thumbnails (7
-days), and deletes them when they expire. You can turn the history off in
-`config.toml` (that also stops remembering your place in videos, or turn off just
-that with `resume = false`), and thumbnails with
-`[preview] output = "off"`. See [Cookies](#cookies) for the one setting that
-reads browser data.
+No account, no telemetry. ytwatch talks only to YouTube's servers: `youtube.com`,
+`i.ytimg.com` and `googlevideo.com` (directly and through `yt-dlp` and `mpv`),
+and `ggpht.com` and `fonts.gstatic.com` for the pictures of the chat page. It keeps your search history and where you stopped
+in each video for 30 days, and thumbnails for 7. Both can be turned off. See
+[Cookies](docs/troubleshooting.md#cookies) for the one setting that reads
+browser data.
 
-## Cookies
+## More
 
-YouTube increasingly treats anonymous `yt-dlp` requests as bots. Sooner or later
-you see "Sign in to confirm you're not a bot", HTTP 429 or HTTP 403, and mpv or
-a download fails. Setting `cookies_from_browser` to a browser where you are
-logged in to YouTube (`"firefox"`, `"chromium"`, `"brave"` and so on) makes
-`yt-dlp` look like a normal visitor, and these errors go away. It applies to
-playing and downloading.
-
-It is off by default because it reads that browser's cookies, and because a
-logged-in view can feed that account's recommendations, which is what ytwatch
-tries to avoid. Use a browser profile with a separate or throwaway account.
-
-## Troubleshooting
-
-- **Playback fails.** The status line shows why. Update `yt-dlp` and `mpv`, then
-  see [Cookies](#cookies).
-- **Boxes after channel names.** Verified and artist channels get a Nerd Font
-  glyph. Use a [Nerd Font](https://www.nerdfonts.com) in your terminal to see it.
-- **Thumbnails are blocky.** They are half-blocks, which every terminal can
-  show. Install `ueberzugpp`, or use kitty or Ghostty. `ytwatch doctor` says
-  which one is in use and why.
-- **No thumbnails.** Run `ytwatch doctor`. With `ueberzugpp`, if your terminal
-  runs under another display server than your session (an X11 terminal in
-  Wayland), set `[preview] output` to `x11` or `wayland`.
-- **kitty thumbnails do not show in tmux.** Add `set -g allow-passthrough on`
-  to `tmux.conf`, and set `[preview] output = "kitty"`, because tmux hides the
-  answer that `auto` looks for. `ytwatch doctor` checks the option.
-- **With ueberzugpp, the thumbnail shows over other tmux windows or panes.**
-  The image is a separate desktop window, so tmux cannot hide it. ytwatch hides
-  it when the pane loses focus, but tmux only reports that with
-  `set -g focus-events on` in `tmux.conf`. `ytwatch doctor` checks it.
-- **With ueberzugpp, the thumbnail is a tiled window on Hyprland.** Add a window
-  rule, see [docs/hyprland.md](docs/hyprland.md).
-- **Results differ from youtube.com.** ytwatch is not logged in, and YouTube
-  personalizes by account. Set `language` and `region` under `[search]`. The
-  region is sent as a fake address, which YouTube may ignore.
+- [Configuration](docs/configuration.md): every option with its default.
+- [Install](docs/install.md): other ways to install, and the programs needed.
+- [Troubleshooting](docs/troubleshooting.md): playback errors, cookies,
+  thumbnails, tmux and Hyprland.
 
 ## License
 

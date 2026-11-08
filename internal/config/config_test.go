@@ -270,26 +270,26 @@ func TestParseUIAnimations(t *testing.T) {
 	}
 }
 
-// The config block of the README is meant to be copied as it is, so it must
+// The config block of docs/configuration.md is meant to be copied as it is, so it must
 // parse and must equal the defaults (except [search], which shows an example).
 func TestReadmeConfigParsesAndMatchesTheDefaults(t *testing.T) {
-	data, err := os.ReadFile("../../README.md")
+	data, err := os.ReadFile("../../docs/configuration.md")
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, after, ok := strings.Cut(string(data), "```toml\n")
 	if !ok {
-		t.Fatal("no toml block in the README")
+		t.Fatal("no toml block in docs/configuration.md")
 	}
 	block, _, _ := strings.Cut(after, "```")
 	cfg, err := Parse(block)
 	if err != nil {
-		t.Fatalf("the README config does not parse: %v", err)
+		t.Fatalf("the documented config does not parse: %v", err)
 	}
 	want := Default()
 	if cfg.General != want.General || cfg.Chat != want.Chat || cfg.Download.Dir != want.Download.Dir ||
 		cfg.History != want.History || cfg.Cache != want.Cache || cfg.UI != want.UI {
-		t.Errorf("the README config differs from the defaults:\n got %+v\nwant %+v", cfg, want)
+		t.Errorf("the documented config differs from the defaults:\n got %+v\nwant %+v", cfg, want)
 	}
 	if cfg.MPV.Workspace != "" || cfg.MPV.CookiesFromBrowser != "" || len(cfg.MPV.Args) != 0 {
 		t.Errorf("mpv should be empty by default: %+v", cfg.MPV)
