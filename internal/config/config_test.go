@@ -314,3 +314,29 @@ hide = ["videos"]`); err == nil || !strings.Contains(err.Error(), "shorts, playl
 		t.Errorf("an unknown kind should list the valid ones, got %v", err)
 	}
 }
+
+func TestParseSubtitles(t *testing.T) {
+	cfg, err := Parse("[mpv]\nsubtitles = \"en, pt-BR,en,es-419\"\nauto_subtitles = true")
+	if err != nil || cfg.MPV.Subtitles != "en,pt-BR,es-419" || !cfg.MPV.AutoSubtitles {
+		t.Fatalf("spaces and repeats go away: cfg=%+v err=%v", cfg.MPV, err)
+	}
+
+	def, _ := Parse("")
+	if def.MPV.Subtitles != "" || def.MPV.AutoSubtitles {
+		t.Errorf("subtitles are off by default: %+v", def.MPV)
+	}
+}
+
+func TestParseSubtitlesErrors(t *testing.T) {
+	for _, value := range []string{
+		`"en;rm -rf"`, `"en pt"`, `"--sid=1"`, `"en,%5%x"`, `"e"`, `"english"`, `"en,,,x"`, `"pt-BR-"`,
+		`"a1,b2,c3,d4,e5,f6,g7,h8,i9"`, `"en=1"`, `"en\npt"`,
+	} {
+		if _, err := Parse("[mpv]\nsubtitles = " + value); err == nil {
+			t.Errorf("subtitles = %s should be refused", value)
+		}
+	}
+	if _, err := Parse("[mpv]\nauto_subtitles = maybe"); err == nil {
+		t.Error("a boolean is expected")
+	}
+}

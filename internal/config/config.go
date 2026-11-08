@@ -150,7 +150,41 @@ type MPV struct {
 	// YouTube cookies yt-dlp uses inside mpv. It avoids YouTube's "confirm
 	// you're not a bot" and rate-limit errors. Empty disables it.
 	CookiesFromBrowser string
+	// Subtitles are the languages of the subtitles mpv shows, in order of
+	// preference, as YouTube names them ("en,pt-BR"). Empty shows none; the
+	// j key of mpv still cycles through the ones a video has.
+	Subtitles string
+	// AutoSubtitles also uses YouTube's automatic captions for Subtitles.
+	AutoSubtitles bool
 }
+
+// ParseSubtitleLanguages checks a list of subtitle languages such as
+// "en,pt-BR" and returns it without spaces and repeats. The list is given to
+// mpv and yt-dlp, so only language codes are accepted.
+func ParseSubtitleLanguages(value string) (string, error) {
+	var languages []string
+
+	for _, language := range strings.Split(value, ",") {
+		if language = strings.TrimSpace(language); language == "" {
+			continue
+		}
+		if !subtitleLanguage.MatchString(language) {
+			return "", fmt.Errorf("invalid subtitle language %q: use codes like en or pt-BR, separated by commas", language)
+		}
+		if !slices.Contains(languages, language) {
+			languages = append(languages, language)
+		}
+	}
+	if len(languages) > maxSubtitleLanguages {
+		return "", fmt.Errorf("too many subtitle languages (at most %d)", maxSubtitleLanguages)
+	}
+
+	return strings.Join(languages, ","), nil
+}
+
+const maxSubtitleLanguages = 8
+
+var subtitleLanguage = regexp.MustCompile(`^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8}){0,2}$`)
 
 type Chat struct {
 	// Enabled controls whether live streams open YouTube's chat pop-out, and
@@ -299,6 +333,13 @@ func (c *Config) set(section, key, raw string) error {
 		c.MPV.CookiesFromBrowser, err = parseString(raw)
 	case "mpv.args":
 		c.MPV.Args, err = parseStringArray(raw)
+	case "mpv.subtitles":
+		var value string
+		if value, err = parseString(raw); err == nil {
+			c.MPV.Subtitles, err = ParseSubtitleLanguages(value)
+		}
+	case "mpv.auto_subtitles":
+		c.MPV.AutoSubtitles, err = strconv.ParseBool(raw)
 
 	case "search.language":
 		var value string

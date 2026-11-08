@@ -97,3 +97,41 @@ func TestStartEscapesDollarInTheTitle(t *testing.T) {
 		t.Fatalf("mpv would expand the title:\n%s", data)
 	}
 }
+
+func TestSubtitleArgs(t *testing.T) {
+	for name, tc := range map[string]struct {
+		mpv  config.MPV
+		want []string
+	}{
+		"off":            {config.MPV{}, nil},
+		"auto only":      {config.MPV{AutoSubtitles: true}, nil},
+		"manual":         {config.MPV{Subtitles: "en,pt-BR"}, []string{"--slang=en,pt-BR"}},
+		"with automatic": {config.MPV{Subtitles: "en", AutoSubtitles: true}, []string{"--slang=en", "--ytdl-raw-options-append=write-auto-subs=", "--ytdl-raw-options-append=sub-langs=en"}},
+		"several languages": {config.MPV{Subtitles: "en,pt-BR", AutoSubtitles: true},
+			[]string{"--slang=en,pt-BR", "--ytdl-raw-options-append=write-auto-subs=", "--ytdl-raw-options-append=sub-langs=en|pt-BR"}},
+	} {
+		got := subtitleArgs(tc.mpv)
+		if strings.Join(got, "\n") != strings.Join(tc.want, "\n") {
+			t.Errorf("%s: %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
+func TestStartPassesTheSubtitleLanguages(t *testing.T) {
+	out := fakeMPV(t)
+	cfg := config.Default()
+	cfg.MPV.Subtitles, cfg.MPV.AutoSubtitles = "pt-BR,en", true
+
+	p, err := Start([]media.Video{{ID: "video0001", Title: "A"}}, cfg, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = p.Wait()
+
+	data, _ := os.ReadFile(out)
+	for _, want := range []string{"--slang=pt-BR,en", "--ytdl-raw-options-append=write-auto-subs=", "--ytdl-raw-options-append=sub-langs=pt-BR|en"} {
+		if !strings.Contains(string(data), want+"\n") {
+			t.Errorf("mpv must get %q as one argument:\n%s", want, data)
+		}
+	}
+}

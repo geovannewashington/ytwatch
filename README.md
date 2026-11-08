@@ -152,6 +152,8 @@ quality = "best"              # best, 1080p, 720p, 480p, 360p
 workspace = ""                # move mpv windows here; empty: leave them where the WM puts them
 args = []                     # extra mpv arguments, for example ["--volume=60"]
 cookies_from_browser = ""     # for example "firefox"; read "Cookies" below
+subtitles = ""                # languages in order of preference, as YouTube names them: "en,pt-BR"; empty: none (j cycles in mpv)
+auto_subtitles = false        # also use YouTube's automatic captions for those languages
 
 [chat]
 enabled = true                # open the chat of live streams and replays

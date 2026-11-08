@@ -179,6 +179,30 @@ func IsForbidden(err error) bool {
 	return errors.As(err, &f) && strings.Contains(f.Reason, "HTTP 403")
 }
 
+// subtitleArgs are the mpv arguments for the subtitle languages of the config.
+// mpv has the subtitles of a video as tracks already, and --slang picks the
+// first language that matches. YouTube's automatic captions are only there when
+// yt-dlp is asked for them, with write-auto-subs and the languages it may take.
+// mpv splits the value of --ytdl-raw-options at commas and has no way to keep
+// one, so the languages go to yt-dlp as the alternatives of a regular
+// expression (en|pt-BR). The languages are checked by the config, so they hold
+// nothing but letters, digits and hyphens, which are not special in it.
+func subtitleArgs(mpv config.MPV) []string {
+	if mpv.Subtitles == "" {
+		return nil
+	}
+
+	args := []string{"--slang=" + mpv.Subtitles}
+	if mpv.AutoSubtitles {
+		args = append(args,
+			"--ytdl-raw-options-append=write-auto-subs=",
+			"--ytdl-raw-options-append=sub-langs="+strings.ReplaceAll(mpv.Subtitles, ",", "|"),
+		)
+	}
+
+	return args
+}
+
 // Start opens videos in one mpv. Several videos make a queue that mpv steps
 // through like a playlist.
 func Start(videos []media.Video, cfg config.Config, opts Options) (*Process, error) {
@@ -235,6 +259,7 @@ func Start(videos []media.Video, cfg config.Config, opts Options) (*Process, err
 	if cfg.MPV.CookiesFromBrowser != "" {
 		args = append(args, "--ytdl-raw-options-append=cookies-from-browser="+cfg.MPV.CookiesFromBrowser)
 	}
+	args = append(args, subtitleArgs(cfg.MPV)...)
 	args = append(args, cfg.MPV.Args...)
 
 	// The socket is in a directory only the user can open, because whoever
