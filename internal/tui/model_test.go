@@ -1502,3 +1502,19 @@ func TestSetConfigPicksTheRendererFromTheSetting(t *testing.T) {
 		t.Errorf("off: %+v", m.output)
 	}
 }
+
+func TestChannelTextShowsTheMarkOfTheChannel(t *testing.T) {
+	for name, tc := range map[string]struct {
+		video media.Video
+		want  string
+	}{
+		"plain":    {media.Video{Channel: "Some Channel"}, "Some Channel"},
+		"verified": {media.Video{Channel: "Some Channel", ChannelVerified: true}, "Some Channel \uf058"},
+		"artist":   {media.Video{Channel: "Taylor Swift", ChannelVerified: true, ChannelArtist: true}, "Taylor Swift \uf001"},
+		"unknown":  {media.Video{ChannelVerified: true}, "Unknown channel \uf058"},
+	} {
+		if got := channelText(tc.video); got != tc.want {
+			t.Errorf("%s: channelText = %q, want %q", name, got, tc.want)
+		}
+	}
+}

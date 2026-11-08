@@ -2604,20 +2604,20 @@ func (m *Model) renderResultLines(width, height int) string {
 		}
 		lines = append(lines, line)
 
-		meta := clean(v.ChannelName())
+		meta := channelText(v)
 		if text, ok := durationPart(v); ok {
 			meta += " · " + text
 		}
 
 		if v.IsPlaylist() {
 			meta = strings.Join(
-				append([]string{clean(v.ChannelName()), "playlist"}, playlistFacts(v)...),
+				append([]string{channelText(v), "playlist"}, playlistFacts(v)...),
 				" · ",
 			)
 		} else if v.IsCurrentlyLive() {
-			meta = clean(v.ChannelName()) + " · streaming now"
+			meta = channelText(v) + " · streaming now"
 			if v.ConcurrentViewers > 0 {
-				meta = clean(v.ChannelName()) + " · " + v.ViewsText() // "watching now"
+				meta = channelText(v) + " · " + v.ViewsText() // "watching now"
 			}
 		} else if v.ViewCount > 0 {
 			meta += " · " + v.ViewsText()
@@ -2799,7 +2799,7 @@ func (m *Model) renderPreview(width, height int) string {
 	} else {
 		lines = append(lines, "")
 		lines = append(lines, m.marqueeText(clean(v.Title), width))
-		lines = append(lines, metaStyle.Render(truncate(clean(v.ChannelName()), width)))
+		lines = append(lines, metaStyle.Render(truncate(channelText(v), width)))
 
 		var stats []string
 		// A stream on air is announced by the section below, so only the
@@ -3267,6 +3267,16 @@ func wrapLines(s string, width, maxLines int) []string {
 // Bengali or Hindi) or that would break the layout (control characters). Such
 // characters make borders drift while scrolling.
 func clean(s string) string { return sanitize(s) }
+
+// channelText is the name of the channel of v, with its mark when it has one.
+func channelText(v media.Video) string {
+	name := clean(v.ChannelName())
+	if badge := v.ChannelBadge(); badge != "" {
+		name += " " + badge
+	}
+
+	return name
+}
 
 // durationPart is the length of v for a row or the preview. A result whose
 // details have not arrived yet has no length to show, which is not the same as

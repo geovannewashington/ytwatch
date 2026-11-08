@@ -87,6 +87,19 @@ type watchData struct {
 			Results struct {
 				Results struct {
 					Contents []struct {
+						// The owner of the video and the marks next to the
+						// name of the channel.
+						SecondaryInfo struct {
+							Owner struct {
+								Renderer struct {
+									Badges []struct {
+										Renderer struct {
+											Style string `json:"style"`
+										} `json:"metadataBadgeRenderer"`
+									} `json:"badges"`
+								} `json:"videoOwnerRenderer"`
+							} `json:"owner"`
+						} `json:"videoSecondaryInfoRenderer"`
 						PrimaryInfo struct {
 							ViewCount struct {
 								Renderer struct {
@@ -116,6 +129,23 @@ func (d watchData) viewers() int64 {
 	}
 
 	return 0
+}
+
+// channelBadges tells whether the channel of the video is verified, and
+// whether it is an official artist channel, from the marks next to its name.
+func (d watchData) channelBadges() (verified, artist bool) {
+	for _, item := range d.Contents.TwoColumn.Results.Results.Contents {
+		for _, badge := range item.SecondaryInfo.Owner.Renderer.Badges {
+			switch badge.Renderer.Style {
+			case "BADGE_STYLE_TYPE_VERIFIED":
+				verified = true
+			case "BADGE_STYLE_TYPE_VERIFIED_ARTIST":
+				verified, artist = true, true
+			}
+		}
+	}
+
+	return verified, artist
 }
 
 // chatReplayToken is the token that opens the chat replay of the page, or ""
@@ -217,6 +247,7 @@ func parseWatchPage(page []byte, id string) (media.Video, error) {
 	}
 
 	video.ChatReplayToken = data.chatReplayToken()
+	video.ChannelVerified, video.ChannelArtist = data.channelBadges()
 
 	published := player.Microformat.Renderer.PublishDate
 	if when, err := time.Parse(time.RFC3339, published); err == nil {

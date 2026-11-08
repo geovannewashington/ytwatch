@@ -233,3 +233,31 @@ func TestHasChatReplayNeedsAPastStreamAndAToken(t *testing.T) {
 		t.Error("details without a token must not erase it")
 	}
 }
+
+func TestChannelBadge(t *testing.T) {
+	for name, tc := range map[string]struct {
+		video Video
+		want  string
+	}{
+		"none":     {Video{}, ""},
+		"verified": {Video{ChannelVerified: true}, "\uf058"},
+		"artist":   {Video{ChannelVerified: true, ChannelArtist: true}, "\uf001"},
+		"artist, even if only the artist flag is set": {Video{ChannelArtist: true}, "\uf001"},
+	} {
+		if got := tc.video.ChannelBadge(); got != tc.want {
+			t.Errorf("%s: ChannelBadge() = %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
+func TestMergeDetailsKeepsTheChannelBadge(t *testing.T) {
+	flat := Video{ID: "abcdefghijk", ChannelVerified: true} // from the search
+	merged := MergeDetails(flat, Video{ChannelVerified: true, ChannelArtist: true})
+	if !merged.ChannelVerified || !merged.ChannelArtist {
+		t.Errorf("the details tell it is an artist: %+v", merged)
+	}
+
+	if kept := MergeDetails(merged, Video{}); !kept.ChannelVerified || !kept.ChannelArtist {
+		t.Errorf("details without a badge must not remove it: %+v", kept)
+	}
+}

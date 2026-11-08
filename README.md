@@ -232,6 +232,8 @@ tries to avoid. Use a browser profile with a separate or throwaway account.
 
 - **Playback fails.** The status line shows why. Update `yt-dlp` and `mpv`, then
   see [Cookies](#cookies).
+- **Boxes after channel names.** Verified and artist channels get a Nerd Font
+  glyph. Use a [Nerd Font](https://www.nerdfonts.com) in your terminal to see it.
 - **Thumbnails are blocky.** They are half-blocks, which every terminal can
   show. Install `ueberzugpp`, or use kitty or Ghostty. `ytwatch doctor` says
   which one is in use and why.

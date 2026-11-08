@@ -14,14 +14,20 @@ var validVideoID = regexp.MustCompile(`^[A-Za-z0-9_-]{6,20}$`)
 
 // Video contains the subset of yt-dlp metadata used by ytwatch.
 type Video struct {
-	ID                string  `json:"id"`
-	Title             string  `json:"title"`
-	WebpageURL        string  `json:"webpage_url"`
-	OriginalURL       string  `json:"original_url"`
-	URL               string  `json:"url"`
-	Channel           string  `json:"channel"`
-	ChannelURL        string  `json:"channel_url"`
-	ChannelID         string  `json:"channel_id"`
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	WebpageURL  string `json:"webpage_url"`
+	OriginalURL string `json:"original_url"`
+	URL         string `json:"url"`
+	Channel     string `json:"channel"`
+	ChannelURL  string `json:"channel_url"`
+	ChannelID   string `json:"channel_id"`
+	// ChannelVerified is set for a verified channel, and for an official
+	// artist channel, which is verified too.
+	ChannelVerified bool `json:"channel_is_verified"`
+	// ChannelArtist is set for an official artist channel (the music note),
+	// which only the watch page tells.
+	ChannelArtist     bool    `json:"-"`
 	Uploader          string  `json:"uploader"`
 	Duration          float64 `json:"duration"`
 	DurationString    string  `json:"duration_string"`
@@ -106,6 +112,26 @@ const KindNames = "shorts, playlists, live, upcoming, vods"
 func ParseKind(name string) (Kind, bool) {
 	kind, ok := kindNames[strings.ToLower(strings.TrimSpace(name))]
 	return kind, ok
+}
+
+// The marks of ChannelBadge are Nerd Font glyphs (nf-fa-music, nf-fa-check_circle),
+// so they need a Nerd Font in the terminal.
+const (
+	artistMark   = "\uf001"
+	verifiedMark = "\uf058"
+)
+
+// ChannelBadge is the mark next to the name of the channel: a music note for an
+// official artist channel, a check for a verified one, or "".
+func (v Video) ChannelBadge() string {
+	switch {
+	case v.ChannelArtist:
+		return artistMark
+	case v.ChannelVerified:
+		return verifiedMark
+	}
+
+	return ""
 }
 
 func (v Video) ChannelName() string {
@@ -453,6 +479,12 @@ func MergeDetails(base, details Video) Video {
 	}
 	if details.ChannelID != "" {
 		base.ChannelID = details.ChannelID
+	}
+	if details.ChannelVerified || details.ChannelArtist {
+		base.ChannelVerified = true
+	}
+	if details.ChannelArtist {
+		base.ChannelArtist = true
 	}
 	if details.Uploader != "" {
 		base.Uploader = details.Uploader

@@ -334,3 +334,42 @@ func TestParseWatchPageReadsTheChatReplayToken(t *testing.T) {
 		}
 	}
 }
+
+// ownerData is the part of ytInitialData that holds the marks next to the name
+// of the channel.
+func ownerData(styles ...string) map[string]any {
+	badges := []any{}
+	for _, style := range styles {
+		badges = append(badges, map[string]any{"metadataBadgeRenderer": map[string]any{"style": style}})
+	}
+
+	return map[string]any{"contents": map[string]any{"twoColumnWatchNextResults": map[string]any{
+		"results": map[string]any{"results": map[string]any{"contents": []any{
+			map[string]any{"videoSecondaryInfoRenderer": map[string]any{"owner": map[string]any{
+				"videoOwnerRenderer": map[string]any{"badges": badges},
+			}}},
+		}}},
+	}}}
+}
+
+func TestParseWatchPageReadsTheChannelBadges(t *testing.T) {
+	for name, tc := range map[string]struct {
+		data             map[string]any
+		verified, artist bool
+	}{
+		"verified":     {ownerData("BADGE_STYLE_TYPE_VERIFIED"), true, false},
+		"artist":       {ownerData("BADGE_STYLE_TYPE_VERIFIED_ARTIST"), true, true},
+		"both":         {ownerData("BADGE_STYLE_TYPE_VERIFIED", "BADGE_STYLE_TYPE_VERIFIED_ARTIST"), true, true},
+		"another mark": {ownerData("BADGE_STYLE_TYPE_SOMETHING_NEW"), false, false},
+		"no marks":     {ownerData(), false, false},
+		"no data":      {nil, false, false},
+	} {
+		video, err := parseWatchPage(watchPage(t, recordingPlayer("abcdefghijk"), tc.data), "abcdefghijk")
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if video.ChannelVerified != tc.verified || video.ChannelArtist != tc.artist {
+			t.Errorf("%s: verified = %v, artist = %v", name, video.ChannelVerified, video.ChannelArtist)
+		}
+	}
+}
