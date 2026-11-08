@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/geovannewashington/ytwatch/internal/youtube"
 )
 
 // maxShown is how many messages the page gets at a time.
@@ -121,7 +123,8 @@ func (s *Server) page(w http.ResponseWriter) {
 	h := w.Header()
 	h.Set("Content-Type", "text/html; charset=utf-8")
 	h.Set("Content-Security-Policy", "default-src 'none'; script-src 'nonce-"+nonce+"'; style-src 'nonce-"+nonce+
-		"'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+		"'; img-src "+strings.Join(youtube.ChatImageHosts, " ")+
+		"; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 
 	_, _ = w.Write([]byte(strings.ReplaceAll(pageHTML, "{{nonce}}", nonce)))
 }

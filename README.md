@@ -41,7 +41,8 @@ It also stays light: [yt-dlp](https://github.com/yt-dlp/yt-dlp) searches,
   next to the video. Past live streams are marked too, so you can tell a
   recording (VOD) from a normal upload, which YouTube itself does not show.
   A recording with a chat replay opens it in the chat window too: ytwatch
-  serves a small page on `127.0.0.1` that follows the time of the video in mpv.
+  serves a small page on `127.0.0.1` that follows the time of the video in mpv,
+  with profile pictures, member and moderator badges, emoji and Super Chats.
 - **Playlists:** `Enter` plays the whole playlist, `B` opens it to pick videos.
 - **Queue and download:** select several results with `V`, then play them in one
   mpv or download them. Choose the quality, or audio only.
@@ -205,7 +206,10 @@ Other files: search history in `~/.local/state/ytwatch/history`, thumbnails in
 ytwatch has no account, no telemetry and no analytics. It talks to YouTube's
 servers (`youtube.com` and `i.ytimg.com` for searches and thumbnails, and
 `googlevideo.com` for the video itself), directly and through `yt-dlp` and
-`mpv`, and to nobody else. On your disk it keeps a history of your searches (30
+`mpv`, and to nobody else. The chat replay page also loads the profile
+pictures, badges and emoji of the chat in your browser, from YouTube's image
+servers only (`*.ggpht.com` and `fonts.gstatic.com`), without telling them
+which page asked. On your disk it keeps a history of your searches (30
 days) and a cache of thumbnails (7 days), and deletes them when they expire.
 You can turn the history off in `config.toml`, and thumbnails with
 `[preview] output = "off"`. See [Cookies](#cookies) for the one setting that

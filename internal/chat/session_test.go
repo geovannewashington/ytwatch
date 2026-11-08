@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,7 +13,22 @@ import (
 )
 
 func msg(id string, seconds float64, text string) youtube.ChatMessage {
-	return youtube.ChatMessage{ID: id, Author: "@" + id, Text: text, Offset: time.Duration(seconds * float64(time.Second))}
+	m := youtube.ChatMessage{ID: id, Author: "@" + id, Text: text, Offset: time.Duration(seconds * float64(time.Second))}
+	if text != "" {
+		m.Runs = []youtube.ChatRun{{Text: text}}
+	}
+
+	return m
+}
+
+// text is what a message of the page says, without its pictures.
+func (m Message) text() string {
+	var b strings.Builder
+	for _, run := range m.Runs {
+		b.WriteString(run.Text)
+	}
+
+	return b.String()
 }
 
 type fetchCall struct {
@@ -105,7 +121,7 @@ func TestSessionStartsAtTheTimeOfTheVideoAndFollowsIt(t *testing.T) {
 	}
 
 	snapshot := f.Snapshot(50)
-	if len(snapshot.Messages) != 3 || snapshot.Messages[0].Text != "a" || snapshot.Messages[2].Text != "c" {
+	if len(snapshot.Messages) != 3 || snapshot.Messages[0].text() != "a" || snapshot.Messages[2].text() != "c" {
 		t.Fatalf("messages up to 100 s, without the old one: %+v", snapshot.Messages)
 	}
 	if snapshot.Time != 100 || snapshot.Status != "" || snapshot.Title != "A stream" {
@@ -113,7 +129,7 @@ func TestSessionStartsAtTheTimeOfTheVideoAndFollowsIt(t *testing.T) {
 	}
 
 	f.step(135 * time.Second) // the video moved on
-	if got := f.Snapshot(50); len(got.Messages) != 4 || got.Messages[3].Text != "d" {
+	if got := f.Snapshot(50); len(got.Messages) != 4 || got.Messages[3].text() != "d" {
 		t.Errorf("after moving on: %+v", got.Messages)
 	}
 }
@@ -135,7 +151,7 @@ func TestSessionStartsAgainAfterASeek(t *testing.T) {
 		!calls[2].seek || calls[2].offset != 20*time.Second {
 		t.Fatalf("each jump must ask again at its time: %+v", calls)
 	}
-	if got := f.Snapshot(50); len(got.Messages) != 1 || got.Messages[0].Text != "b" {
+	if got := f.Snapshot(50); len(got.Messages) != 1 || got.Messages[0].text() != "b" {
 		t.Errorf("only the messages of the new place: %+v", got.Messages)
 	}
 }
@@ -236,7 +252,7 @@ func TestSessionSnapshotLimitsAndSkipsEmptyMessages(t *testing.T) {
 	f.step(10 * time.Second)
 
 	got := f.Snapshot(2)
-	if len(got.Messages) != 2 || got.Messages[0].Text != "three" || got.Messages[1].Text != "four" {
+	if len(got.Messages) != 2 || got.Messages[0].text() != "three" || got.Messages[1].text() != "four" {
 		t.Errorf("the newest two that were said already: %+v", got.Messages)
 	}
 	if all := f.Snapshot(50); len(all.Messages) != 3 {
@@ -390,5 +406,53 @@ func TestSessionGivesUpWhenMpvNeverOpensItsSocket(t *testing.T) {
 	f.step(0)
 	if !f.Ended() {
 		t.Error("mpv that never starts must end the chat, or the page waits for ever")
+	}
+}
+
+func TestSnapshotIncludesTheNextMomentsForThePageClock(t *testing.T) {
+	f := newFake(t)
+	f.pages = []youtube.ChatPage{{
+		Messages: []youtube.ChatMessage{msg("now", 99, "now"), msg("soon", 101.5, "soon"), msg("later", 103, "later")},
+		Next:     "t",
+	}}
+	f.step(100 * time.Second)
+
+	got := f.Snapshot(10).Messages
+	if len(got) != 2 || got[1].text() != "soon" {
+		t.Errorf("up to ahead (%v) of the time: %+v", ahead, got)
+	}
+}
+
+func TestSnapshotCarriesWhatTheRichMessageHas(t *testing.T) {
+	f := newFake(t)
+	rich := youtube.ChatMessage{
+		ID: "r", Offset: time.Second, Author: "@mod", Role: "moderator", Kind: youtube.ChatPaid, Amount: "$5.00", Sub: "hi",
+		Photo:  "https://yt4.ggpht.com/p=s64",
+		Badges: []youtube.ChatBadge{{Kind: "member", Label: "Member (1 year)", Image: "https://yt3.ggpht.com/b"}, {Kind: "moderator", Label: "Moderator"}},
+		Runs:   []youtube.ChatRun{{Text: "hello "}, {Image: "https://fonts.gstatic.com/s/e/notoemoji/15.1/1f4a5/72.png", Alt: ":boom:"}},
+		Colors: youtube.ChatColors{HeaderBackground: "rgba(1,2,3,1.00)", BodyText: "rgba(0,0,0,0.87)"},
+	}
+	f.pages = []youtube.ChatPage{{Messages: []youtube.ChatMessage{rich}, Next: "t"}}
+	f.step(10 * time.Second)
+
+	got := f.Snapshot(5).Messages[0]
+	if got.Photo != rich.Photo || got.Role != "moderator" || got.Kind != 1 || got.Amount != "$5.00" || got.Sub != "hi" ||
+		len(got.Badges) != 2 || got.Badges[0].Image != "https://yt3.ggpht.com/b" || got.Badges[1].Image != "" ||
+		len(got.Runs) != 2 || got.Runs[1].Alt != ":boom:" || got.Runs[1].Image == "" ||
+		got.Colors == nil || got.Colors.HeaderBackground != "rgba(1,2,3,1.00)" || got.Colors.BodyBackground != "" {
+		t.Errorf("message = %+v", got)
+	}
+}
+
+func TestSnapshotNeverPassesAPictureFromAnotherPlace(t *testing.T) {
+	m := youtube.ChatMessage{
+		ID: "x", Author: "@a", Photo: "https://evil.example/p.png",
+		Badges: []youtube.ChatBadge{{Kind: "member", Image: "http://yt3.ggpht.com/b"}},
+		Runs:   []youtube.ChatRun{{Image: "https://yt3.ggpht.com.evil.example/e.png", Alt: ":e:"}},
+	}
+
+	got := page(m)
+	if got.Photo != "" || got.Badges[0].Image != "" || got.Runs[0].Image != "" || got.Runs[0].Alt != ":e:" {
+		t.Errorf("the page must get no address that YouTube's servers do not own: %+v", got)
 	}
 }

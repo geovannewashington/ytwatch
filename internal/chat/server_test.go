@@ -86,7 +86,7 @@ func TestServerServesThePageUnderItsSecretWithAStrictPolicy(t *testing.T) {
 func TestServerGivesTheMessagesAsDataNotAsMarkup(t *testing.T) {
 	server := newServer(t, Snapshot{
 		Title: "<b>t</b>", Time: 12.5,
-		Messages: []Message{{Time: 1, Author: "@a", Text: `<script>alert(1)</script> & "q"`, Kind: 0}},
+		Messages: []Message{{Time: 1, Author: "@a", Runs: []Run{{Text: `<script>alert(1)</script> & "q"`}}, Kind: 0}},
 	})
 
 	response, body := get(t, server.URL+"messages", "")
@@ -98,7 +98,7 @@ func TestServerGivesTheMessagesAsDataNotAsMarkup(t *testing.T) {
 	}
 
 	var got Snapshot
-	if err := json.Unmarshal([]byte(body), &got); err != nil || got.Messages[0].Text != `<script>alert(1)</script> & "q"` || got.Time != 12.5 {
+	if err := json.Unmarshal([]byte(body), &got); err != nil || got.Messages[0].text() != `<script>alert(1)</script> & "q"` || got.Time != 12.5 {
 		t.Errorf("the data must survive the escaping: %+v, %v", got, err)
 	}
 }
@@ -169,4 +169,47 @@ func TestServerStopsOnClose(t *testing.T) {
 func portOf(s *Server) string {
 	_, port, _ := net.SplitHostPort(s.host)
 	return port
+}
+
+func TestServerAllowsPicturesFromYouTubesImageServersOnly(t *testing.T) {
+	server := newServer(t, Snapshot{})
+
+	response, _ := get(t, server.URL, "")
+	policy := response.Header.Get("Content-Security-Policy")
+
+	var imgSrc string
+	for _, directive := range strings.Split(policy, ";") {
+		if directive = strings.TrimSpace(directive); strings.HasPrefix(directive, "img-src ") {
+			imgSrc = directive
+		}
+	}
+	if imgSrc != "img-src https://*.ggpht.com https://fonts.gstatic.com" {
+		t.Errorf("the pictures may come from nowhere else: %q in %q", imgSrc, policy)
+	}
+	if strings.Contains(policy, "data:") || strings.Contains(policy, "unsafe") || strings.Contains(policy, "http:") {
+		t.Errorf("the policy is looser than it should be: %q", policy)
+	}
+}
+
+// The messages are text from strangers, so the page must never turn them into
+// markup. These checks look at the source of the page for what would allow it.
+func TestPageNeverBuildsMarkupFromData(t *testing.T) {
+	for _, bad := range []string{
+		"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function", "setTimeout(\"", "setInterval(\"",
+		"srcdoc", "javascript:", "DOMParser", "createContextualFragment",
+	} {
+		if strings.Contains(pageHTML, bad) {
+			t.Errorf("the page uses %q", bad)
+		}
+	}
+
+	// An inline handler in the markup (onclick="...") would need a looser policy.
+	if inline := regexp.MustCompile(`<[a-z][^>]*\son[a-z]+\s*=`).FindString(pageHTML); inline != "" {
+		t.Errorf("an inline event handler: %q", inline)
+	}
+
+	// The pictures are loaded without telling YouTube which page asked.
+	if !strings.Contains(pageHTML, `referrerPolicy = "no-referrer"`) {
+		t.Error("pictures must be loaded without a referrer")
+	}
 }

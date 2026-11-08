@@ -297,12 +297,46 @@ func (s *Session) Ended() bool {
 	return s.ended
 }
 
+// ahead is how far past the time of mpv the page gets messages. The page keeps
+// its own clock and shows each message at its time, so the messages arrive
+// smoothly and not in a bunch each time mpv is asked.
+const ahead = 2 * time.Second
+
+// Run is a piece of a message: text, or an emoji as an image.
+type Run struct {
+	Text  string `json:"x,omitempty"`
+	Image string `json:"i,omitempty"`
+	Alt   string `json:"alt,omitempty"`
+}
+
+// Badge is a mark next to the name of the author.
+type Badge struct {
+	Kind  string `json:"k"`
+	Label string `json:"l,omitempty"`
+	Image string `json:"i,omitempty"`
+}
+
+// Colors are the colors of a Super Chat, as CSS colors.
+type Colors struct {
+	HeaderBackground string `json:"hb,omitempty"`
+	HeaderText       string `json:"ht,omitempty"`
+	BodyBackground   string `json:"bb,omitempty"`
+	BodyText         string `json:"bt,omitempty"`
+}
+
 // Message is a chat message for the page.
 type Message struct {
+	ID     string  `json:"id"`
 	Time   float64 `json:"t"` // seconds into the video
 	Author string  `json:"a"`
-	Text   string  `json:"x"`
+	Photo  string  `json:"p,omitempty"`
+	Role   string  `json:"role,omitempty"` // owner, moderator, member, verified
+	Badges []Badge `json:"b,omitempty"`
+	Runs   []Run   `json:"r,omitempty"`
 	Kind   int     `json:"k"` // see youtube.ChatKind
+	Amount string  `json:"m,omitempty"`
+	Sub    string  `json:"s,omitempty"`
+	Colors *Colors `json:"c,omitempty"`
 }
 
 // Snapshot is what the page shows.
@@ -314,8 +348,8 @@ type Snapshot struct {
 	Messages []Message `json:"messages"`
 }
 
-// Snapshot returns up to limit messages, the newest last, that were said by
-// the time mpv is at.
+// Snapshot returns up to limit messages, the newest last, that are said by the
+// time mpv is at, and the ones in the next moments (see ahead).
 func (s *Session) Snapshot(limit int) Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -323,15 +357,14 @@ func (s *Session) Snapshot(limit int) Snapshot {
 	snapshot := Snapshot{Title: s.opts.Title, Time: s.pos.Seconds(), Ended: s.ended, Messages: []Message{}}
 
 	// messages is sorted by time, so the ones to show are a prefix.
-	shown := sort.Search(len(s.messages), func(i int) bool { return s.messages[i].Offset > s.pos })
+	upTo := s.pos + ahead
+	shown := sort.Search(len(s.messages), func(i int) bool { return s.messages[i].Offset > upTo })
 	for _, message := range s.messages[max(0, shown-limit):shown] {
-		if message.Text == "" && message.Kind == youtube.ChatText {
-			continue // only emoji that cannot be drawn
+		if message.Kind == youtube.ChatText && len(message.Runs) == 0 {
+			continue // nothing to show
 		}
 
-		snapshot.Messages = append(snapshot.Messages, Message{
-			Time: message.Offset.Seconds(), Author: message.Author, Text: message.Text, Kind: int(message.Kind),
-		})
+		snapshot.Messages = append(snapshot.Messages, page(message))
 	}
 
 	switch {
@@ -348,4 +381,33 @@ func (s *Session) Snapshot(limit int) Snapshot {
 	}
 
 	return snapshot
+}
+
+// page turns a message into what the page gets. The addresses of pictures are
+// checked again: the page loads them, so only YouTube's servers are allowed.
+func page(m youtube.ChatMessage) Message {
+	out := Message{
+		ID: m.ID, Time: m.Offset.Seconds(), Author: m.Author, Photo: image(m.Photo),
+		Role: m.Role, Kind: int(m.Kind), Amount: m.Amount, Sub: m.Sub,
+	}
+
+	for _, badge := range m.Badges {
+		out.Badges = append(out.Badges, Badge{Kind: badge.Kind, Label: badge.Label, Image: image(badge.Image)})
+	}
+	for _, run := range m.Runs {
+		out.Runs = append(out.Runs, Run{Text: run.Text, Image: image(run.Image), Alt: run.Alt})
+	}
+	if c := m.Colors; c != (youtube.ChatColors{}) {
+		out.Colors = &Colors{HeaderBackground: c.HeaderBackground, HeaderText: c.HeaderText, BodyBackground: c.BodyBackground, BodyText: c.BodyText}
+	}
+
+	return out
+}
+
+func image(url string) string {
+	if youtube.ChatImageAllowed(url) {
+		return url
+	}
+
+	return ""
 }
