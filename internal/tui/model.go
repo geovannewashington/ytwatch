@@ -1361,7 +1361,7 @@ func (m *Model) handleSearchEvent(event youtube.Event) []tea.Cmd {
 				c.id = event.Video.ChannelID
 			}
 		}
-		rank := event.Rank
+		rank := m.boostedRank(event.Video, event.Rank)
 		if base := m.narrowBase; base != nil {
 			// A filter is on: the result joins the whole list, and the one on
 			// screen when it matches.

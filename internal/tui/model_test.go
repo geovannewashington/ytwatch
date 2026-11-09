@@ -2442,6 +2442,49 @@ func TestOpeningAPlaylistFromAFilteredListComesBackToTheWholeList(t *testing.T) 
 	}
 }
 
+func TestStartedVideosRiseAFewPlacesInASearchButNotInAPlaylist(t *testing.T) {
+	m := New("test")
+	m.progress = map[string]time.Duration{
+		"started0001": 600 * time.Second,
+		"done0000001": 1190 * time.Second,
+		"tiny0000001": 3 * time.Second,
+	}
+	started := media.Video{ID: "started0001", Duration: 1200, URL: "https://www.youtube.com/watch?v=started0001"}
+	done := media.Video{ID: "done0000001", Duration: 1200, URL: "https://www.youtube.com/watch?v=done0000001"}
+	tiny := media.Video{ID: "tiny0000001", Duration: 1200, URL: "https://www.youtube.com/watch?v=tiny0000001"}
+	fresh := media.Video{ID: "fresh000001", Duration: 1200, URL: "https://www.youtube.com/watch?v=fresh000001"}
+	short := media.Video{ID: "started0001", Duration: 20, Short: true}
+
+	if got := m.boostedRank(started, 100); got != 100 {
+		t.Errorf("outside a search nothing moves: %d", got)
+	}
+	m.resultCap = youtube.ResultLimit
+	if got := m.boostedRank(started, 100); got != 100-resumeBoost {
+		t.Errorf("a started video rises: %d", got)
+	}
+	for name, v := range map[string]media.Video{"watched": done, "barely started": tiny, "never watched": fresh, "short": short} {
+		if got := m.boostedRank(v, 100); got != 100 {
+			t.Errorf("%s keeps its rank: %d", name, got)
+		}
+	}
+	if resumeBoost%10 != 0 {
+		t.Error("a boost that is not a multiple of 10 would give two results the same rank")
+	}
+
+	// In the list a started video passes the ones just above it, and no more.
+	for i := 0; i < 12; i++ {
+		v := fresh
+		v.ID = fmt.Sprintf("other%06d", i)
+		m.handleSearchEvent(youtube.Event{Kind: youtube.EventResult, Video: v, Rank: i * 10})
+	}
+	// Rank 105 comes after the 11 results of ranks 0 to 100, as the 12th. The
+	// boost puts it at rank 55, after the 6 results of ranks 0 to 50.
+	m.handleSearchEvent(youtube.Event{Kind: youtube.EventResult, Video: started, Rank: 105})
+	if at := slices.IndexFunc(m.items, func(v media.Video) bool { return v.ID == "started0001" }); at != 6 {
+		t.Errorf("the 12th place rises 5 places to the 7th: now at %d", at+1)
+	}
+}
+
 func TestTheUnsafeWidthTableIsSortedSoTheSearchCanStopEarly(t *testing.T) {
 	for i, span := range unsafeWidth {
 		if span[0] > span[1] {

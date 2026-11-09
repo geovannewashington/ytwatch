@@ -145,3 +145,22 @@ func progressBar(fraction float64, cells int) string {
 	return progressStyle.Render(strings.Repeat("━", filled)) +
 		metaStyle.Render(strings.Repeat("─", cells-filled))
 }
+
+// resumeBoost is how far a video that was started and not finished rises in the
+// results of a search: 5 places of the main query, whose results are 10 apart.
+// It stays small, so the order is still mostly YouTube's.
+const resumeBoost = 50
+
+// boostedRank is the rank of a result of a search. A video left halfway rises a
+// few places, so it is easy to continue. The lists of a playlist or a channel
+// keep their own order.
+func (m *Model) boostedRank(v media.Video, rank int) int {
+	if m.resultCap == 0 || !rememberable(v) {
+		return rank
+	}
+	if resume.Resumable(m.progress[v.ID], videoLength(v)) {
+		return rank - resumeBoost
+	}
+
+	return rank
+}
