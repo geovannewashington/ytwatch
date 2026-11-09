@@ -29,7 +29,7 @@ type Row struct {
 var Rows = []Row{
 	{
 		"Type",
-		[]string{"Any", "Videos", "Shorts", "Live", "Playlists"},
+		[]string{"Any", "Videos", "Shorts", "Live", "Playlists", "Channels"},
 		"What to search for. Live: streams happening now.",
 	},
 	{
@@ -58,6 +58,7 @@ const (
 	TypeShorts
 	TypeLive
 	TypePlaylists
+	TypeChannels
 )
 
 // Get returns the selected option of a row.
@@ -81,16 +82,22 @@ func (f *Filters) Set(row, option int) {
 
 // Applied returns the filters YouTube can apply. It has no upload date filter
 // for Shorts: a search for Shorts with a date finds nothing, so the date is
-// left out.
+// left out. Channels have neither a length nor a date.
 func (f Filters) Applied() Filters {
-	if f.Type == TypeShorts {
+	if f.Type == TypeShorts || f.Type == TypeChannels {
 		f.Date = 0
+	}
+	if f.Type == TypeChannels {
+		f.Duration = 0
 	}
 	return f
 }
 
-// DateIgnored reports whether the upload date is set but has no effect.
-func (f Filters) DateIgnored() bool { return f.Type == TypeShorts }
+// DateIgnored reports whether the upload date has no effect with this type.
+func (f Filters) DateIgnored() bool { return f.Type == TypeShorts || f.Type == TypeChannels }
+
+// DurationIgnored reports whether the duration has no effect with this type.
+func (f Filters) DurationIgnored() bool { return f.Type == TypeChannels }
 
 // Active reports whether any filter differs from the default.
 func (f Filters) Active() bool { return f != Filters{} }
@@ -114,8 +121,8 @@ func (f Filters) Summary() string { return strings.Join(f.Names(), ", ") }
 // YouTube's own codes for the options above, indexed like Rows. They are the
 // numbers inside the "sp" search parameter, which is a base64 protobuf.
 var (
-	typeCodes     = [...]byte{0, 1, 9, 1, 3} // any, video, Shorts, live (a video), playlist
-	durationCodes = [...]byte{0, 1, 3, 2}    // under 4, 4-20, over 20 minutes
+	typeCodes     = [...]byte{0, 1, 9, 1, 3, 2} // any, video, Shorts, live (a video), playlist, channel
+	durationCodes = [...]byte{0, 1, 3, 2}       // under 4, 4-20, over 20 minutes
 	dateCodes     = [...]byte{0, 2, 3, 4, 5}
 )
 

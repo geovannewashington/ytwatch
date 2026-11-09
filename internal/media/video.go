@@ -27,8 +27,16 @@ type Video struct {
 	ChannelVerified bool `json:"channel_is_verified"`
 	// ChannelArtist is set for an official artist channel (the music note),
 	// which only the watch page tells.
-	ChannelArtist     bool    `json:"-"`
-	Uploader          string  `json:"uploader"`
+	ChannelArtist bool   `json:"-"`
+	Uploader      string `json:"uploader"`
+	// UploaderID is the @handle of a channel, in a channel result.
+	UploaderID string `json:"uploader_id"`
+	// PlaylistUploader is the channel whose tab a flat entry was listed from.
+	PlaylistUploader string `json:"playlist_uploader"`
+	// PlaylistChannelID is the ID of that channel.
+	PlaylistChannelID string `json:"playlist_channel_id"`
+	// SubscriberCount is the number of subscribers, in a channel result.
+	SubscriberCount   int64   `json:"channel_follower_count"`
 	Duration          float64 `json:"duration"`
 	DurationString    string  `json:"duration_string"`
 	ViewCount         int64   `json:"view_count"`
@@ -101,6 +109,7 @@ const (
 	KindPastLive
 	KindShort
 	KindPlaylist
+	KindChannel
 )
 
 // kindNames are the names of the kinds that [search] hide accepts. Plain
@@ -176,6 +185,10 @@ func (v Video) ThumbnailCandidates() []string {
 	video := !v.IsPlaylist() && validVideoID.MatchString(v.ID)
 	var out []string
 	add := func(raw string) {
+		// Channel pictures come without a scheme, as "//yt3.ggpht.com/...".
+		if strings.HasPrefix(raw, "//") {
+			raw = "https:" + raw
+		}
 		if !isHTTPS(raw) || slices.Contains(out, raw) {
 			return
 		}
@@ -259,12 +272,46 @@ func (v Video) IsChannel() bool {
 	return false
 }
 
+// channelID is the form of a channel ID, which is safe to put in an address.
+var channelID = regexp.MustCompile(`^UC[A-Za-z0-9_-]{22}$`)
+
+// ChannelPage is the address of the channel page of v: v itself for a channel,
+// otherwise the channel the video says it belongs to. It is "" when there is
+// none.
+func (v Video) ChannelPage() string {
+	if v.IsChannel() {
+		return v.CanonicalURL()
+	}
+	if parsed, err := url.Parse(v.ChannelURL); err == nil &&
+		(parsed.Scheme == "https" || parsed.Scheme == "http") && parsed.Host != "" {
+		return v.ChannelURL
+	}
+	if channelID.MatchString(v.ChannelID) {
+		return "https://www.youtube.com/channel/" + v.ChannelID
+	}
+	return ""
+}
+
+// SubscribersText is the number of subscribers of a channel, such as "46.3K
+// subscribers", or "" when it is unknown.
+func (v Video) SubscribersText() string {
+	switch {
+	case v.SubscriberCount <= 0:
+		return ""
+	case v.SubscriberCount == 1:
+		return "1 subscriber"
+	}
+	return compactCount(v.SubscriberCount) + " subscribers"
+}
+
 func (v Video) IsPlaylist() bool {
 	return strings.Contains(v.CanonicalURL(), "/playlist?list=")
 }
 
 func (v Video) Kind() Kind {
 	switch {
+	case v.IsChannel():
+		return KindChannel
 	case v.IsPlaylist():
 		return KindPlaylist
 	case v.IsCurrentlyLive():

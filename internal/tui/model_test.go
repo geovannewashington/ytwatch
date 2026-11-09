@@ -853,7 +853,7 @@ func TestHelpIsShortAndHasNoDuplicateKeys(t *testing.T) {
 			rows++
 		}
 	}
-	if rows > 15 {
+	if rows > 16 {
 		t.Errorf("the help has %d lines of text, keep it short", rows)
 	}
 	for _, duplicate := range []string{"w / b", "n / N", "Tab", "PageUp", "Ctrl+f", "0 / $", "H / M / L"} {
@@ -1517,4 +1517,311 @@ func TestChannelTextShowsTheMarkOfTheChannel(t *testing.T) {
 			t.Errorf("%s: channelText = %q, want %q", name, got, tc.want)
 		}
 	}
+}
+
+const (
+	testChannelID  = "UCZwW2PXNovXy_xUIhmYv7cg"
+	testChannelURL = "https://www.youtube.com/channel/" + testChannelID
+)
+
+func channelResult() media.Video {
+	return media.Video{
+		ID:              "UCZwW2PXNovXy_xUIhmYv7cg",
+		Title:           "Tiago",
+		URL:             testChannelURL,
+		UploaderID:      "@TiagoTaquelim",
+		SubscriberCount: 46300,
+	}
+}
+
+func TestChannelRowAndPreviewShowTheHandleAndSubscribers(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 120, 30
+	m.items = []media.Video{channelResult()}
+	m.ranks = []int{0}
+
+	if label, _ := badgeInfo(channelResult()); label != "CHANNEL" {
+		t.Errorf("badge = %q", label)
+	}
+	rows := m.renderResultLines(60, 10)
+	preview := m.renderPreview(50, 20)
+	for _, want := range []string{"Tiago", "@TiagoTaquelim", "46.3K subscribers", "CHANNEL"} {
+		if !strings.Contains(rows+preview, want) {
+			t.Errorf("missing %q:\n%s\n%s", want, rows, preview)
+		}
+	}
+	if strings.Contains(preview, "Loading details") || len(m.detailTargets()) != 0 {
+		t.Error("a channel has no details to look up")
+	}
+	if hint := m.keyHints(); !strings.Contains(hint, "Enter open channel") {
+		t.Errorf("hint = %q", hint)
+	}
+}
+
+func TestCOpensTheChannelOfTheSelectedVideo(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 120, 30
+	video := media.Video{ID: "video0001", Title: "One", Channel: "The X", ChannelURL: "https://www.youtube.com/@x"}
+	m.items = []media.Video{video, {ID: "video0002", Title: "Two"}}
+	m.ranks = []int{0, 10}
+	m.searchDone, m.metadataDone = true, true
+
+	cmd := m.handleKey(runeKey('c'))
+	if cmd == nil || len(m.parents) != 1 || m.channel == nil {
+		t.Fatalf("c should open the channel: cmd=%v parents=%d", cmd != nil, len(m.parents))
+	}
+	if m.channel.url != "https://www.youtube.com/@x" || m.channel.name != "The X" || m.channel.tab != youtube.ChannelVideos {
+		t.Fatalf("channel = %+v", *m.channel)
+	}
+	if len(m.items) != 0 || !m.searching || m.status != "Opening videos..." {
+		t.Fatalf("the list should load: %d items, searching=%v, status=%q", len(m.items), m.searching, m.status)
+	}
+	header := m.renderHeader()
+	for _, want := range []string{"The X", "[Videos]", "Shorts", "Live", "Playlists"} {
+		if !strings.Contains(header, want) {
+			t.Errorf("the header should show %q:\n%s", want, header)
+		}
+	}
+	m.cancel()
+
+	// A video that does not say its channel has none to open.
+	m2 := New("test")
+	m2.items = []media.Video{{ID: "video0002", Title: "Two"}}
+	if cmd := m2.handleKey(runeKey('c')); cmd != nil || m2.status != "No channel link for this video" || m2.channel != nil {
+		t.Fatalf("cmd=%v status=%q", cmd != nil, m2.status)
+	}
+
+	// The channel ID is enough.
+	m3 := New("test")
+	m3.items = []media.Video{{ID: "video0003", ChannelID: "UCZwW2PXNovXy_xUIhmYv7cg"}}
+	m3.handleKey(runeKey('c'))
+	m3.cancel()
+	if m3.channel == nil || m3.channel.url != testChannelURL {
+		t.Fatalf("channel = %+v", m3.channel)
+	}
+}
+
+func TestEnterAndBOpenAChannelRowAndPlayAndDownloadRefuseIt(t *testing.T) {
+	for _, key := range []tea.KeyMsg{{Type: tea.KeyEnter}, runeKey('B'), runeKey('c'), runeKey('s')} {
+		m := New("test")
+		m.items = []media.Video{channelResult()}
+		m.ranks = []int{0}
+		if cmd := m.handleKey(key); cmd == nil || m.channel == nil || m.channel.name != "Tiago" || m.channel.url != testChannelURL {
+			t.Errorf("%v should open the channel: %+v", key, m.channel)
+		}
+		m.cancel()
+	}
+
+	m := New("test")
+	m.items = []media.Video{channelResult(), {ID: "video0001", URL: "https://www.youtube.com/watch?v=video0001"}}
+	if cmd := m.handleKey(runeKey('d')); cmd != nil || !strings.Contains(m.status, "Channels can't be downloaded") {
+		t.Errorf("status = %q", m.status)
+	}
+	m.handleKey(runeKey('V'))
+	m.selected = 0
+	m.visualAnchor = 0
+	if videos, skip := m.selectedVideos(false); len(videos) != 0 || skip.channels != 1 || skip.text() != "skipped 1 channel" {
+		t.Errorf("a selection leaves channels out: %v %+v", videos, skip)
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !strings.Contains(m.status, "Nothing to play") || !strings.Contains(m.status, "1 channel") {
+		t.Errorf("status = %q", m.status)
+	}
+}
+
+func TestBracketsSwitchTheChannelTabAndEscComesBack(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 120, 30
+	results := []media.Video{{ID: "video0001", Title: "One", ChannelURL: "https://www.youtube.com/@x"}, playlistVideo()}
+	m.items, m.ranks = results, []int{0, 10}
+	m.selected = 1
+	m.query = "golang"
+	m.searchDone, m.metadataDone = true, true
+
+	m.selected = 0
+	m.handleKey(runeKey('c'))
+	m.handleSearchEvent(youtube.Event{Kind: youtube.EventResult, Video: media.Video{ID: "inside0001", Title: "Inside"}, Rank: 0})
+	if len(m.items) != 1 || len(m.parents) != 1 {
+		t.Fatalf("items=%d parents=%d", len(m.items), len(m.parents))
+	}
+
+	generation := m.generation
+	if cmd := m.handleKey(runeKey(']')); cmd == nil || m.channel.tab != youtube.ChannelShorts {
+		t.Fatalf("] should go to Shorts: %+v", m.channel)
+	}
+	if len(m.parents) != 1 || len(m.items) != 0 || m.generation == generation || m.status != "Opening shorts..." {
+		t.Fatalf("a tab replaces the list without a new parent: parents=%d items=%d status=%q", len(m.parents), len(m.items), m.status)
+	}
+	if !strings.Contains(m.renderHeader(), "[Shorts]") {
+		t.Errorf("the current tab is marked:\n%s", m.renderHeader())
+	}
+	m.handleKey(runeKey(']'))
+	m.handleKey(runeKey(']'))
+	if m.channel.tab != youtube.ChannelPlaylists {
+		t.Fatalf("tab = %d", m.channel.tab)
+	}
+	m.handleKey(runeKey(']')) // wraps around
+	if m.channel.tab != youtube.ChannelVideos {
+		t.Fatalf("] after the last tab = %d, want the first", m.channel.tab)
+	}
+	m.handleKey(runeKey('['))
+	if m.channel.tab != youtube.ChannelPlaylists {
+		t.Fatalf("[ on the first tab = %d, want the last", m.channel.tab)
+	}
+
+	// A playlist of the channel opens inside it, and Esc comes back to the
+	// channel at the same tab and row.
+	m.handleSearchEvent(youtube.Event{Kind: youtube.EventResult, Video: playlistVideo(), Rank: 0})
+	m.handleSearchEvent(youtube.Event{Kind: youtube.EventResult, Video: media.Video{ID: "list0000002", Title: "Other list", URL: "https://www.youtube.com/playlist?list=list0000002"}, Rank: 10})
+	m.selected = 1
+	m.handleKey(runeKey('B'))
+	if m.channel != nil || len(m.parents) != 2 || m.listTitle != "Other list" {
+		t.Fatalf("a playlist is not a channel: channel=%+v parents=%d title=%q", m.channel, len(m.parents), m.listTitle)
+	}
+	m.handleKey(runeKey(']'))
+	if m.status != "No channel open"+noteMark+"c opens the channel of a video" {
+		t.Errorf("] outside a channel: %q", m.status)
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.channel == nil || m.channel.tab != youtube.ChannelPlaylists || m.selected != 1 || len(m.items) != 2 || len(m.parents) != 1 {
+		t.Fatalf("Esc should return to the Playlists tab: channel=%+v selected=%d items=%d parents=%d", m.channel, m.selected, len(m.items), len(m.parents))
+	}
+
+	m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.channel != nil || len(m.parents) != 0 || len(m.items) != 2 || m.items[0].ID != "video0001" || m.status != "2 results" {
+		t.Fatalf("Esc should return to the search: channel=%+v parents=%d items=%d status=%q", m.channel, len(m.parents), len(m.items), m.status)
+	}
+	m.handleKey(runeKey('q'))
+	if !m.confirmQuit {
+		t.Error("q on the main page asks to quit")
+	}
+	m.cancel()
+}
+
+func TestAPastedChannelLinkOpensTheChannelWithoutAHistoryEntry(t *testing.T) {
+	m := New("")
+	m.history = history.Load(filepath.Join(t.TempDir(), "history"), 24*time.Hour, 10, time.Now())
+	m.filters = youtube.Filters{Type: youtube.TypeLive}
+
+	if cmd := m.beginSearch("https://www.youtube.com/@GoogleDevelopers/videos"); cmd == nil {
+		t.Fatal("nothing started")
+	}
+	m.cancel()
+	if m.channel == nil || m.channel.url != "https://www.youtube.com/@GoogleDevelopers" || m.channel.tab != youtube.ChannelVideos {
+		t.Fatalf("channel = %+v", m.channel)
+	}
+	if m.status != "Opening videos..." || len(m.parents) != 0 {
+		t.Errorf("status=%q parents=%d", m.status, len(m.parents))
+	}
+	if got := m.history.Queries(); len(got) != 0 {
+		t.Fatalf("links must not be saved as searches: %q", got)
+	}
+
+	// The name comes from the first result, and the list is not capped.
+	m.handleSearchEvent(youtube.Event{Kind: youtube.EventResult, Video: media.Video{ID: "video0001", Title: "One", Channel: "Google for Developers"}})
+	if m.channel.name != "Google for Developers" || !strings.Contains(m.renderHeader(), "Google for Developers") {
+		t.Errorf("name = %q", m.channel.name)
+	}
+	for i := 0; i < youtube.ResultLimit+5; i++ {
+		m.handleSearchEvent(youtube.Event{Kind: youtube.EventResult, Video: media.Video{ID: fmt.Sprintf("vid%07d", i), Title: "V"}, Rank: 10 + i})
+	}
+	if len(m.items) != youtube.ResultLimit+6 {
+		t.Errorf("a channel tab is not capped: %d items", len(m.items))
+	}
+
+	// A new search leaves the channel.
+	m.beginSearch("something else")
+	m.cancel()
+	if m.channel != nil {
+		t.Error("a new search should leave the channel")
+	}
+}
+
+func TestChannelFilterMenuExplainsThatDurationAndDateAreIgnored(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 100, 30
+	m.showFilters = true
+	m.filterDraft = youtube.Filters{Type: youtube.TypeChannels, Duration: 1, Date: 2}
+	for _, col := range []int{youtube.RowDuration, youtube.RowDate} {
+		m.filterCol = col
+		if out := m.View(); !strings.Contains(out, "Channels have no length or date") {
+			t.Fatalf("column %d should explain why it does nothing:\n%s", col, out)
+		}
+	}
+	if !strings.Contains(m.View(), "Channels") {
+		t.Error("the Type column lists Channels")
+	}
+	if got := m.filterDraft.Summary(); got != "Channels" {
+		t.Errorf("summary = %q", got)
+	}
+}
+
+func TestCInsideTheOpenChannelDoesNotOpenItAgain(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 120, 30
+	m.items, m.ranks = []media.Video{{ID: "video0001", Title: "One", ChannelURL: "https://www.youtube.com/@x"}}, []int{0}
+	m.query = "golang"
+	m.searchDone, m.metadataDone = true, true
+
+	m.handleKey(runeKey('c'))
+	if m.channel == nil || len(m.parents) != 1 {
+		t.Fatalf("c should open the channel: %+v parents=%d", m.channel, len(m.parents))
+	}
+
+	// A row of the tab, by its link.
+	m.handleSearchEvent(youtube.Event{Kind: youtube.EventResult, Video: media.Video{ID: "inside0001", Title: "Inside", ChannelURL: "https://www.youtube.com/@x"}})
+	if cmd := m.handleKey(runeKey('c')); cmd != nil || len(m.parents) != 1 || !strings.HasPrefix(m.status, "Already in this channel") {
+		t.Fatalf("c in the same channel: parents=%d status=%q", len(m.parents), m.status)
+	}
+
+	// A row whose details changed its link to the /channel/ form, by its ID.
+	m.applyChannelInfo(channelInfoMsg{url: "https://www.youtube.com/@x", info: youtube.ChannelInfo{ID: testChannelID, Name: "The X"}})
+	m.items[0] = media.Video{ID: "inside0001", Title: "Inside", ChannelURL: testChannelURL, ChannelID: testChannelID}
+	if cmd := m.handleKey(runeKey('c')); cmd != nil || len(m.parents) != 1 {
+		t.Fatalf("c on a video of the channel by ID: parents=%d status=%q", len(m.parents), m.status)
+	}
+
+	// Another channel opens on top.
+	m.items[0] = media.Video{ID: "other00001", Title: "Other", ChannelURL: "https://www.youtube.com/@y"}
+	if cmd := m.handleKey(runeKey('c')); cmd == nil || len(m.parents) != 2 || m.channel.url != "https://www.youtube.com/@y" {
+		t.Fatalf("c on another channel: parents=%d channel=%+v", len(m.parents), m.channel)
+	}
+	m.cancel()
+}
+
+func TestTheChannelPageLimitsTheTabs(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 120, 30
+	m.items, m.ranks = []media.Video{{ID: "video0001", Title: "One", ChannelURL: "https://www.youtube.com/@x"}}, []int{0}
+	m.query = "golang"
+	m.handleKey(runeKey('c'))
+
+	// The answer for a channel that is not open any more is dropped.
+	if cmd := m.applyChannelInfo(channelInfoMsg{url: "https://www.youtube.com/@old", info: youtube.ChannelInfo{ID: "UCold", Tabs: []int{youtube.ChannelLive}}}); cmd != nil || m.channel.tabs != nil {
+		t.Fatalf("stale info applied: %+v", m.channel)
+	}
+
+	// Without Videos, the channel moves to its first tab.
+	info := youtube.ChannelInfo{ID: testChannelID, Name: "The X", Tabs: []int{youtube.ChannelShorts, youtube.ChannelPlaylists}}
+	if cmd := m.applyChannelInfo(channelInfoMsg{url: "https://www.youtube.com/@x", info: info}); cmd == nil || m.channel.tab != youtube.ChannelShorts {
+		t.Fatalf("the channel should open Shorts: %+v", m.channel)
+	}
+	if header := m.renderHeader(); !strings.Contains(header, "[Shorts] Playlists") || strings.Contains(header, "Videos") || strings.Contains(header, "Live") {
+		t.Errorf("only the tabs the channel has are shown:\n%s", header)
+	}
+	m.handleKey(runeKey(']'))
+	if m.channel.tab != youtube.ChannelPlaylists {
+		t.Fatalf("] = %d, want Playlists", m.channel.tab)
+	}
+	m.handleKey(runeKey(']'))
+	if m.channel.tab != youtube.ChannelShorts {
+		t.Fatalf("] wraps to %d, want Shorts", m.channel.tab)
+	}
+
+	// With one tab, [ and ] say so.
+	m.channel.tabs, m.channel.tab = []int{youtube.ChannelVideos}, youtube.ChannelVideos
+	if cmd := m.handleKey(runeKey(']')); cmd != nil || m.status != "This channel has only Videos" {
+		t.Errorf("one tab: %q", m.status)
+	}
+	m.cancel()
 }

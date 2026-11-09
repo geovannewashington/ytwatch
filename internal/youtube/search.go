@@ -43,6 +43,7 @@ const (
 	// A filtered search is one query on the results page.
 	filteredResultCount   = ResultLimit
 	filteredPlaylistCount = ResultLimit
+	filteredChannelCount  = ResultLimit
 )
 
 type Event struct {
@@ -281,12 +282,27 @@ func Search(
 			})
 		} else if filters.Type == TypePlaylists {
 			queries = append(queries, func() queryResult {
-				return runPlaylistQuery(
+				return runEntryQuery(
 					searchCtx,
 					resultsURL(query, filters),
 					filteredPlaylistCount,
 					loc,
 					mainRanking,
+					media.Video.IsPlaylist,
+					&seen,
+					&uniqueCount,
+					emit,
+				)
+			})
+		} else if filters.Type == TypeChannels {
+			queries = append(queries, func() queryResult {
+				return runEntryQuery(
+					searchCtx,
+					resultsURL(query, filters),
+					filteredChannelCount,
+					loc,
+					mainRanking,
+					media.Video.IsChannel,
 					&seen,
 					&uniqueCount,
 					emit,
@@ -348,12 +364,13 @@ func Search(
 		// Hidden kinds are not even requested.
 		if !hidden[media.KindPlaylist] {
 			queries = append(queries, func() queryResult {
-				return runPlaylistQuery(
+				return runEntryQuery(
 					searchCtx,
 					playlistSearchURL(query),
 					playlistCount,
 					loc,
 					playlistRanking,
+					media.Video.IsPlaylist,
 					&seen,
 					&uniqueCount,
 					emit,
@@ -553,14 +570,16 @@ func playlistSearchURL(query string) string {
 	return resultsURL(query, Filters{Type: TypePlaylists})
 }
 
-// runPlaylistQuery emits playlist results. Their size and first videos come
-// later, from a detail lookup of the selected playlist.
-func runPlaylistQuery(
+// runEntryQuery emits the entries of source that want accepts, which are
+// playlists or channels: runQuery drops those. The size and first videos of a
+// playlist come later, from a detail lookup of the selected playlist.
+func runEntryQuery(
 	ctx context.Context,
 	source string,
 	limit int,
 	loc locale.Locale,
 	order ranking,
+	want func(media.Video) bool,
 	seen *sync.Map,
 	uniqueCount *atomic.Int64,
 	emit func(Event),
@@ -593,20 +612,20 @@ func runPlaylistQuery(
 		if ctx.Err() != nil {
 			break
 		}
-		var playlist media.Video
-		if err := json.Unmarshal(scanner.Bytes(), &playlist); err != nil ||
-			playlist.ID == "" ||
-			!playlist.IsPlaylist() {
+		var entry media.Video
+		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil ||
+			entry.ID == "" ||
+			!want(entry) {
 			continue
 		}
 
 		position := rows
 		rows++
 
-		if _, duplicate := seen.LoadOrStore(playlist.ID, struct{}{}); !duplicate {
+		if _, duplicate := seen.LoadOrStore(entry.ID, struct{}{}); !duplicate {
 			emit(Event{
 				Kind:  EventResult,
-				Video: playlist,
+				Video: entry,
 				Count: int(uniqueCount.Add(1)),
 				Rank:  order.at(position),
 			})
@@ -647,7 +666,7 @@ func FetchDetailsBatch(
 
 	for _, v := range videos {
 		switch {
-		case v.CanonicalURL() == "":
+		case v.CanonicalURL() == "", v.IsChannel(): // a channel has no watch page
 		case v.IsPlaylist():
 			playlists = append(playlists, v)
 		default:

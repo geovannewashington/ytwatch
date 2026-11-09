@@ -13,6 +13,7 @@ func TestParamMatchesYouTubesOwnValues(t *testing.T) {
 		"videos only":    {Filters{Type: TypeVideos}, "EgIQAQ=="},
 		"Shorts only":    {Filters{Type: TypeShorts}, "EgIQCQ=="},
 		"playlists only": {Filters{Type: TypePlaylists}, "EgIQAw=="},
+		"channels only":  {Filters{Type: TypeChannels}, "EgIQAg=="},
 		"live":           {Filters{Type: TypeLive}, "EgQQAUAB"},
 		"under 4 min":    {Filters{Duration: 1}, "EgQQARgB"},
 		"4-20 min":       {Filters{Duration: 2}, "EgQQARgD"},
@@ -95,5 +96,21 @@ func TestShortsIgnoreTheDateEverywhere(t *testing.T) {
 	}
 	if got := (Filters{Type: TypePlaylists, Date: 2}).Applied().Date; got != 2 {
 		t.Errorf("playlists keep the date, got %d", got)
+	}
+}
+
+func TestChannelsIgnoreDurationAndDate(t *testing.T) {
+	f := Filters{Type: TypeChannels, Duration: 3, Date: 2}
+	if got := f.Param(); got != "EgIQAg==" {
+		t.Errorf("Param() = %q, want the channels filter alone", got)
+	}
+	if got := f.Summary(); got != "Channels" {
+		t.Errorf("Summary() = %q, want %q", got, "Channels")
+	}
+	if !f.DateIgnored() || !f.DurationIgnored() {
+		t.Error("channels have no date and no length")
+	}
+	if (Filters{Type: TypeShorts}).DurationIgnored() {
+		t.Error("Shorts have a length")
 	}
 }
