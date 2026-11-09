@@ -82,6 +82,7 @@ ytwatch "Go interfaces"  # opens with a search
 | `i` | Edit the search (`r` repeats it, `f` sets filters) |
 | `j` `k` `h` `l` | Move / switch between results and preview |
 | `Enter` `s` | Play / play from the start (on a channel: open it) |
+| `gh` | History: the videos you played, the last one first, with how far you got |
 | `c` `Tab` | Open the channel of the video / next channel tab (`Shift-Tab` previous, `Alt-1`..`9` jump) |
 | `V` | Select several results, then `Enter` plays and `d` downloads them |
 | `d` `a` `Q` | Download / audio only / quality |
@@ -99,8 +100,8 @@ channel pictures, and `ggpht.com` and `fonts.gstatic.com` for the pictures of
 the chat page. The one other place is GitHub, and only when you run
 `ytwatch update`: it never checks by itself.
 
-It keeps your search history and where you stopped in each video for 30 days,
-and thumbnails for 7. Both can be turned off. See
+It keeps your search history, the videos you played (title, channel and where
+you stopped) for 30 days, and thumbnails for 7. Both can be turned off. See
 [Cookies](docs/troubleshooting.md#cookies) for the one setting that reads
 browser data.
 

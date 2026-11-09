@@ -27,6 +27,7 @@ import (
 	"github.com/geovannewashington/ytwatch/internal/player"
 	"github.com/geovannewashington/ytwatch/internal/preview"
 	"github.com/geovannewashington/ytwatch/internal/quality"
+	"github.com/geovannewashington/ytwatch/internal/resume"
 	"github.com/geovannewashington/ytwatch/internal/theme"
 	"github.com/geovannewashington/ytwatch/internal/youtube"
 )
@@ -198,6 +199,8 @@ type Model struct {
 	chats        map[string]*chat.Session // the chat replays that follow them, by video id
 	resumeDir    string                   // where mpv keeps the position of each video, see resume.go
 	progress     map[string]time.Duration // the position of each video that was left, by video id
+	metaPath     string                   // the file of what is known of the videos played, see resume.Entry
+	meta         map[string]resume.Entry  // the history: what is known of each video played, by video id
 	animations   int                      // animOff, animMinimal or animFull, see fx.go
 	fx           fxState
 	clock        func() time.Time // replaces time.Now in tests
@@ -438,8 +441,17 @@ func (m *Model) beginSearch(query string) tea.Cmd {
 		m.history.Add(query, time.Now())
 	}
 
+	// The videos left halfway that the search is about come first, under a stream
+	// that is on air, so a video that is easy to continue is not lost among
+	// results that are not about what the user watched.
+	left := m.leftMatching(query)
 	cmd := m.startListing("Searching...", youtube.ResultLimit, func(ctx context.Context, start int, emit func(youtube.Event)) {
 		page := (start-1)/youtube.ResultLimit + 1
+		if page == 1 {
+			for i, v := range left {
+				emit(youtube.Event{Kind: youtube.EventResult, Video: v, Rank: i - len(left) - 2*resumeBoost})
+			}
+		}
 		youtube.SearchPage(ctx, query, filters, hide, loc, page, emit)
 	})
 	m.resultCap = youtube.ResultLimit
@@ -1384,6 +1396,7 @@ func (m *Model) handleSearchEvent(event youtube.Event) []tea.Cmd {
 
 	case youtube.EventDetails:
 		m.eachCopy(event.Video.ID, func(v *media.Video) { *v = media.MergeDetails(*v, event.Video) })
+		m.noteDetails(event.Video.ID)
 
 		if _, isPlaying := m.playing[event.Video.ID]; isPlaying &&
 			event.Video.IsCurrentlyLive() &&
@@ -1633,6 +1646,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	if m.pendingG {
 		m.pendingG = false
+		if key == "h" {
+			return m.openHistory() // gh: go to the history
+		}
 		if key == "g" {
 			if m.focus == previewPane {
 				m.previewScroll = 0
@@ -3005,7 +3021,7 @@ func (m *Model) keyHints() string {
 		return "j/k move · Enter browse channel · / filter · i search · ? help"
 	}
 
-	return "j/k move · Enter play · d download · c channel · V select · / filter · i search · f filters · ? help"
+	return "j/k move · Enter play · d download · c channel · gh history · V select · / filter · i search · f filters · ? help"
 }
 
 func (m *Model) renderHeader() string {
@@ -3021,6 +3037,8 @@ func (m *Model) renderHeader() string {
 	switch {
 	case m.searchMode:
 		searchLine += renderInput(m.searchInput, m.searchCursor, max(10, m.width-8))
+	case m.query == "" && m.listTitle != "":
+		searchLine += playlistBadgeStyle.Render(playlistMark+" ") + truncate(m.listTitle, max(10, m.width-10))
 	case m.query == "":
 		searchLine += helpStyle.Render("press / to search")
 	case m.channel != nil:
@@ -3794,7 +3812,7 @@ func (m *Model) renderHelp() string {
 		{"h l", "Switch between the results and the preview"},
 		{"Enter  B", "Play (all of a playlist) / browse a playlist"},
 		{"c  Tab", "Open the channel of a video / switch its tabs (Alt+1-9 jumps)"},
-		{"s", "Play from the start a video that was left halfway"},
+		{"s  gh", "Play from the start / open the history"},
 		{"Esc", "Back · quits on the main page"},
 		{"/  i  r", "Filter results (Esc clears) / edit search / repeat it"},
 		{"f", "Filters: type, duration, upload date"},

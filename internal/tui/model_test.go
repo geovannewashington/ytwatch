@@ -24,7 +24,9 @@ import (
 	"github.com/geovannewashington/ytwatch/internal/config"
 	"github.com/geovannewashington/ytwatch/internal/history"
 	"github.com/geovannewashington/ytwatch/internal/media"
+	"github.com/geovannewashington/ytwatch/internal/player"
 	"github.com/geovannewashington/ytwatch/internal/preview"
+	"github.com/geovannewashington/ytwatch/internal/resume"
 	"github.com/geovannewashington/ytwatch/internal/theme"
 	"github.com/geovannewashington/ytwatch/internal/youtube"
 )
@@ -2483,6 +2485,304 @@ func TestStartedVideosRiseAFewPlacesInASearchButNotInAPlaylist(t *testing.T) {
 	if at := slices.IndexFunc(m.items, func(v media.Video) bool { return v.ID == "started0001" }); at != 6 {
 		t.Errorf("the 12th place rises 5 places to the 7th: now at %d", at+1)
 	}
+}
+
+// resumeModel is a model whose watch later folder holds the given positions.
+func resumeModel(t *testing.T, positions map[string]time.Duration, ages map[string]time.Duration) *Model {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "state", "watch_later")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for id, position := range positions {
+		content := fmt.Sprintf("# https://www.youtube.com/watch?v=%s\nstart=%d\n", id, int(position.Seconds()))
+		path := filepath.Join(dir, "file-"+id)
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		when := time.Now().Add(-ages[id])
+		if err := os.Chtimes(path, when, when); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m := New("test")
+	m.width, m.height = 140, 40
+	m.SetResume(dir)
+
+	return m
+}
+
+func TestPlayingAVideoPutsItInTheHistoryWithItsTitleAndChannel(t *testing.T) {
+	m := resumeModel(t, nil, nil)
+	v := media.Video{ID: "cazevideo01", Title: "CazeTV game", Channel: "CazeTV", Duration: 3600, URL: "https://www.youtube.com/watch?v=cazevideo01"}
+	live := media.Video{ID: "liveliveliv", Title: "Live now", Channel: "CazeTV", IsLive: true}
+	short := media.Video{ID: "shortshort1", Title: "A short", Channel: "CazeTV", Duration: 20, Short: true}
+	list := playlistVideo()
+
+	for _, played := range []media.Video{v, live, short, list, channelResult()} {
+		m.resumeOptions([]media.Video{played}, player.Options{})
+	}
+	entries := resume.LoadMeta(m.metaPath)
+	if len(entries) != 3 {
+		t.Fatalf("every video played is in the history, but a playlist and a channel are not videos: %+v", entries)
+	}
+	if e := entries["cazevideo01"]; e.Title != "CazeTV game" || e.Channel != "CazeTV" || e.Duration != 3600 || e.Played == 0 {
+		t.Errorf("entry = %+v", e)
+	}
+	if !entries["shortshort1"].Short || entries["liveliveliv"].Played == 0 {
+		t.Errorf("a Short is marked, and a stream is kept: %+v", entries)
+	}
+	info, err := os.Stat(m.metaPath)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Errorf("the file is for the user only: %v %v", info, err)
+	}
+	if got := m.leftHalfway(); len(got) != 0 {
+		t.Errorf("nothing was left halfway yet: %+v", got)
+	}
+}
+
+func TestTheHistoryKeepsWhatTheConfigSaysAndDropsTheRest(t *testing.T) {
+	m := resumeModel(t, map[string]time.Duration{"positiononl": 600 * time.Second}, nil)
+	m.cfg.History.MaxAgeDays, m.cfg.History.MaxEntries = 30, 3
+	day := int64(24 * 60 * 60)
+	now := time.Now().Unix()
+	m.meta = map[string]resume.Entry{
+		"ancientvid1":  {ID: "ancientvid1", Title: "Old", Played: now - 40*day},
+		"week000001a":  {ID: "week000001a", Title: "A", Played: now - 7*day},
+		"week000002b":  {ID: "week000002b", Title: "B", Played: now - 6*day},
+		"today00001c":  {ID: "today00001c", Title: "C", Played: now - 60},
+		"today00002d":  {ID: "today00002d", Title: "D", Played: now - 30},
+		"noplayedgone": {ID: "noplayedgone", Title: "No time, no position"},
+		"positiononl":  {ID: "positiononl", Title: "Only a position"},
+	}
+
+	if !m.pruneMeta(time.Now()) {
+		t.Fatal("something should be dropped")
+	}
+	var kept []string
+	for id := range m.meta {
+		kept = append(kept, id)
+	}
+	slices.Sort(kept)
+	// older than 30 days and without a time or a position go, then only the 3
+	// newest stay.
+	if want := []string{"positiononl", "today00001c", "today00002d"}; !slices.Equal(kept, want) {
+		t.Errorf("kept %v, want %v", kept, want)
+	}
+}
+
+func TestLeftHalfwayListsTheLastPlayedFirstAndSkipsFinishedOnes(t *testing.T) {
+	m := resumeModel(t,
+		map[string]time.Duration{
+			"oldoldoldol": 600 * time.Second,
+			"newnewnewne": 300 * time.Second,
+			"finished001": 3500 * time.Second,
+			"tinytinyti1": 3 * time.Second,
+			"noentry0001": 900 * time.Second,
+		}, nil)
+	now := time.Now().Unix()
+	m.meta["oldoldoldol"] = resume.Entry{ID: "oldoldoldol", Title: "Old one", Duration: 2000, Played: now - 7200}
+	m.meta["newnewnewne"] = resume.Entry{ID: "newnewnewne", Title: "New one", Channel: "A", Duration: 1000, Played: now - 60}
+	m.meta["finished001"] = resume.Entry{ID: "finished001", Title: "Done", Duration: 3600, Played: now - 30}
+	m.meta["tinytinyti1"] = resume.Entry{ID: "tinytinyti1", Title: "Barely", Duration: 3600, Played: now - 10}
+	m.meta["neverpartial"] = resume.Entry{ID: "neverpartial", Title: "No position", Duration: 100, Played: now}
+
+	got := m.leftHalfway()
+	if len(got) != 2 || got[0].ID != "newnewnewne" || got[1].ID != "oldoldoldol" {
+		t.Fatalf("only what is in the history and was left halfway, the last played first: %+v", got)
+	}
+	if got[0].Title != "New one" || got[0].Channel != "A" {
+		t.Errorf("what is known comes with it: %q %q", got[0].Title, got[0].Channel)
+	}
+}
+
+func TestDetailsOfAVideoLearnedFromItsPositionAreKeptEvenWhileAFilterHidesIt(t *testing.T) {
+	m := resumeModel(t, map[string]time.Duration{"legacyvideo": 900 * time.Second}, map[string]time.Duration{"legacyvideo": 5 * time.Hour})
+	m.items = m.historyVideos()
+	m.ranks = []int{0}
+	m.Update(runeKey('/'))
+	typeText(m, "zzz") // nothing matches, so the video is not on screen
+	if len(m.items) != 0 {
+		t.Fatalf("items = %d", len(m.items))
+	}
+
+	m.handleSearchEvent(youtube.Event{Kind: youtube.EventDetails, Video: media.Video{ID: "legacyvideo", Title: "Old one", Channel: "B", Duration: 2000}})
+	entry := m.meta["legacyvideo"]
+	if entry.Title != "Old one" || entry.Channel != "B" {
+		t.Fatalf("details are kept: %+v", entry)
+	}
+	if age := time.Since(time.Unix(entry.Played, 0)); age < 4*time.Hour || age > 6*time.Hour {
+		t.Errorf("its time is the one of its position, not now: %v ago", age)
+	}
+	if resume.LoadMeta(m.metaPath)["legacyvideo"].Title != "Old one" {
+		t.Error("it is saved")
+	}
+}
+
+func TestAVideoWithNoPositionIsWatchedOnlyWhenEnoughTimeHasPassed(t *testing.T) {
+	m := resumeModel(t, nil, nil)
+	now := time.Now()
+	v := media.Video{ID: "videoended1", Title: "T", Duration: 1000, URL: "https://www.youtube.com/watch?v=videoended1"}
+	set := func(playedAgo time.Duration, duration float64) media.Video {
+		v.Duration = duration
+		m.meta[v.ID] = resume.Entry{ID: v.ID, Title: "T", Duration: duration, Played: now.Add(-playedAgo).Unix()}
+
+		return v
+	}
+
+	if !m.playedToEnd(set(2*time.Hour, 1000)) {
+		t.Error("played long enough ago, and mpv forgot the position: it ended")
+	}
+	if m.playedToEnd(set(time.Minute, 1000)) {
+		t.Error("a minute into a 17 minute video it cannot have ended: mpv crashed or was killed")
+	}
+	if !m.playedToEnd(set(10*time.Minute, 0)) || m.playedToEnd(set(time.Minute, 0)) {
+		t.Error("with no length, 5 minutes is the least")
+	}
+
+	m.progress[v.ID] = 20 * time.Second
+	if m.playedToEnd(set(2*time.Hour, 1000)) {
+		t.Error("a video with a position did not end")
+	}
+	delete(m.progress, v.ID)
+	m.playing[v.ID] = "T"
+	if m.playedToEnd(set(2*time.Hour, 1000)) {
+		t.Error("a video that is playing has not ended")
+	}
+	delete(m.playing, v.ID)
+	m.meta[v.ID] = resume.Entry{ID: v.ID, Title: "T", Duration: 1000} // no time: learned from a position
+	if m.playedToEnd(v) {
+		t.Error("with no time played, nothing is known")
+	}
+}
+
+func TestGHOpensTheHistoryWithHowFarEachWasWatchedAndEscComesBack(t *testing.T) {
+	m := resumeModel(t, map[string]time.Duration{"halfhalfha1": 600 * time.Second},
+		map[string]time.Duration{"halfhalfha1": 3 * time.Hour})
+	now := time.Now().Unix()
+	m.meta["halfhalfha1"] = resume.Entry{ID: "halfhalfha1", Title: "Half watched", Channel: "CazeTV", Duration: 3000, Played: now - 3*3600}
+	m.meta["finished0001"] = resume.Entry{ID: "finished0001", Title: "Seen to the end", Channel: "CazeTV", Duration: 1000, Played: now - 7200}
+	m.meta["newestvideo1"] = resume.Entry{ID: "newestvideo1", Title: "Played last", Duration: 500, Played: now - 60}
+	m.items, m.ranks = []media.Video{{ID: "other000001", Title: "Other"}}, []int{0}
+	m.query = "something"
+	m.searchDone, m.metadataDone = true, true
+
+	m.handleKey(runeKey('g'))
+	cmd := m.handleKey(runeKey('h'))
+	if cmd == nil || len(m.parents) != 1 || m.listTitle != "History" {
+		t.Fatalf("gh should open the history: cmd=%v parents=%d title=%q", cmd != nil, len(m.parents), m.listTitle)
+	}
+	started := cmd().(searchStartedMsg)
+	for e := range started.events {
+		m.handleSearchEvent(e)
+	}
+	var ids []string
+	for _, v := range m.items {
+		ids = append(ids, v.ID)
+	}
+	if want := []string{"newestvideo1", "finished0001", "halfhalfha1"}; !slices.Equal(ids, want) {
+		t.Fatalf("the last one played first: %v, want %v", ids, want)
+	}
+	if header := m.renderHeader(); !strings.Contains(header, "History") {
+		t.Errorf("the header says what the list is:\n%s", header)
+	}
+
+	// A video that ended shows as watched, and a half-watched one shows how far.
+	if fraction, ok := m.watchedFraction(m.items[1]); !ok || fraction != 1 {
+		t.Errorf("a video with no position that was not left playing ended: %v %v", fraction, ok)
+	}
+	if fraction, ok := m.watchedFraction(m.items[2]); !ok || fraction <= 0 || fraction >= 1 {
+		t.Errorf("a half-watched one shows its place: %v %v", fraction, ok)
+	}
+	if m.listBar(m.items[1]) == "" || m.listBar(m.items[2]) == "" {
+		t.Error("both rows have a bar")
+	}
+
+	m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if len(m.items) != 1 || m.items[0].ID != "other000001" || m.listTitle != "" {
+		t.Errorf("Esc returns to the results: %+v", m.items)
+	}
+
+	// No history yet, and a history that is off.
+	empty := resumeModel(t, nil, nil)
+	empty.handleKey(runeKey('g'))
+	if cmd := empty.handleKey(runeKey('h')); cmd != nil || !strings.HasPrefix(empty.status, "No history yet") {
+		t.Errorf("status = %q", empty.status)
+	}
+	off := New("test")
+	off.handleKey(runeKey('g'))
+	if cmd := off.handleKey(runeKey('h')); cmd != nil || !strings.HasPrefix(off.status, "Watch history is off") {
+		t.Errorf("status = %q", off.status)
+	}
+}
+
+func TestAVideoLearnedFromItsPositionIsInTheHistoryUntilItsTitleArrives(t *testing.T) {
+	m := resumeModel(t, map[string]time.Duration{"legacyvideo": 900 * time.Second}, nil)
+	got := m.historyVideos()
+	if len(got) != 1 || got[0].ID != "legacyvideo" || got[0].Title != "" || got[0].CanonicalURL() == "" {
+		t.Fatalf("history = %+v", got)
+	}
+}
+
+func TestContainsAllWordsIsStrictAboutTheQuery(t *testing.T) {
+	for _, tc := range []struct {
+		text, query string
+		want        bool
+	}{
+		{"CazeTV game night", "cazetv", true},
+		{"Café da manhã", "cafe, manha!", true},
+		{"CazeTV game night", "caze game", true},
+		{"CazeTV game night", "cooking", false},
+		{"CazeTV game night", "", false},
+		{"CazeTV game night", "...", false},
+		{"Learn German", "learning german", false}, // "learning" is not in it
+	} {
+		if got := containsAllWords(tc.text, tc.query); got != tc.want {
+			t.Errorf("containsAllWords(%q, %q) = %v, want %v", tc.text, tc.query, got, tc.want)
+		}
+	}
+}
+
+func TestASearchBringsBackTheVideosLeftHalfwayThatItIsAbout(t *testing.T) {
+	binDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(binDir, "yt-dlp"), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	m := resumeModel(t, map[string]time.Duration{
+		"cazehalf001": 600 * time.Second,
+		"cazehalf002": 900 * time.Second,
+		"otherhalf01": 600 * time.Second,
+		"unknownid01": 600 * time.Second,
+	}, map[string]time.Duration{"cazehalf001": time.Hour, "cazehalf002": 2 * time.Hour})
+	m.meta["cazehalf001"] = resume.Entry{ID: "cazehalf001", Title: "Game one", Channel: "CazeTV", Duration: 3000}
+	m.meta["cazehalf002"] = resume.Entry{ID: "cazehalf002", Title: "Game two", Channel: "CazeTV", Duration: 3000}
+	m.meta["otherhalf01"] = resume.Entry{ID: "otherhalf01", Title: "Cooking", Channel: "Chef", Duration: 3000}
+
+	if got := m.leftMatching("cazetv"); len(got) != 2 || got[0].ID != "cazehalf001" {
+		t.Fatalf("the videos of the channel, the last one first: %+v", got)
+	}
+	if got := m.leftMatching("learning german"); len(got) != 0 {
+		t.Errorf("an unrelated search brings nothing back: %+v", got)
+	}
+
+	m.filters = youtube.Filters{Type: youtube.TypeVideos}
+	cmd := m.beginSearch("cazetv")
+	started := cmd().(searchStartedMsg)
+	var ids []string
+	for e := range started.events {
+		if e.Kind == youtube.EventResult {
+			ids = append(ids, e.Video.ID)
+			if e.Rank >= 0 {
+				t.Errorf("they come above the results of the search: rank %d", e.Rank)
+			}
+		}
+	}
+	if len(ids) != 2 || ids[0] != "cazehalf001" || ids[1] != "cazehalf002" {
+		t.Errorf("ids = %v", ids)
+	}
+	m.cancel()
 }
 
 func TestTheUnsafeWidthTableIsSortedSoTheSearchCanStopEarly(t *testing.T) {
