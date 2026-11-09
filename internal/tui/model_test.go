@@ -2,6 +2,8 @@ package tui
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -856,7 +858,7 @@ func TestHelpIsShortAndHasNoDuplicateKeys(t *testing.T) {
 	if rows > 16 {
 		t.Errorf("the help has %d lines of text, keep it short", rows)
 	}
-	for _, duplicate := range []string{"w / b", "n / N", "Tab", "PageUp", "Ctrl+f", "0 / $", "H / M / L"} {
+	for _, duplicate := range []string{"w / b", "n / N", "PageUp", "Ctrl+f", "0 / $", "H / M / L"} {
 		if strings.Contains(out, duplicate) {
 			t.Errorf("the help should not document %q", duplicate)
 		}
@@ -1553,7 +1555,7 @@ func TestChannelRowAndPreviewShowTheHandleAndSubscribers(t *testing.T) {
 	if strings.Contains(preview, "Loading details") || len(m.detailTargets()) != 0 {
 		t.Error("a channel has no details to look up")
 	}
-	if hint := m.keyHints(); !strings.Contains(hint, "Enter open channel") {
+	if hint := m.keyHints(); !strings.Contains(hint, "Enter browse channel") {
 		t.Errorf("hint = %q", hint)
 	}
 }
@@ -1576,10 +1578,10 @@ func TestCOpensTheChannelOfTheSelectedVideo(t *testing.T) {
 	if len(m.items) != 0 || !m.searching || m.status != "Opening videos..." {
 		t.Fatalf("the list should load: %d items, searching=%v, status=%q", len(m.items), m.searching, m.status)
 	}
-	header := m.renderHeader()
-	for _, want := range []string{"The X", "[Videos]", "Shorts", "Live", "Playlists"} {
-		if !strings.Contains(header, want) {
-			t.Errorf("the header should show %q:\n%s", want, header)
+	screen := m.renderHeader() + m.renderResultLines(100, 20)
+	for _, want := range []string{"@x", "[1 Videos]", "2 Shorts", "3 Live", "4 Podcasts", "5 Playlists"} {
+		if !strings.Contains(screen, want) {
+			t.Errorf("the screen should show %q:\n%s", want, screen)
 		}
 	}
 	m.cancel()
@@ -1629,7 +1631,7 @@ func TestEnterAndBOpenAChannelRowAndPlayAndDownloadRefuseIt(t *testing.T) {
 	}
 }
 
-func TestBracketsSwitchTheChannelTabAndEscComesBack(t *testing.T) {
+func TestTabSwitchesTheChannelTabAndEscComesBack(t *testing.T) {
 	m := New("test")
 	m.width, m.height = 120, 30
 	results := []media.Video{{ID: "video0001", Title: "One", ChannelURL: "https://www.youtube.com/@x"}, playlistVideo()}
@@ -1646,27 +1648,28 @@ func TestBracketsSwitchTheChannelTabAndEscComesBack(t *testing.T) {
 	}
 
 	generation := m.generation
-	if cmd := m.handleKey(runeKey(']')); cmd == nil || m.channel.tab != youtube.ChannelShorts {
-		t.Fatalf("] should go to Shorts: %+v", m.channel)
+	if cmd := m.handleKey(tabKey); cmd == nil || m.channel.tab != youtube.ChannelShorts {
+		t.Fatalf("Tab should go to Shorts: %+v", m.channel)
 	}
 	if len(m.parents) != 1 || len(m.items) != 0 || m.generation == generation || m.status != "Opening shorts..." {
 		t.Fatalf("a tab replaces the list without a new parent: parents=%d items=%d status=%q", len(m.parents), len(m.items), m.status)
 	}
-	if !strings.Contains(m.renderHeader(), "[Shorts]") {
-		t.Errorf("the current tab is marked:\n%s", m.renderHeader())
+	if bar := m.renderResultLines(60, 20); !strings.Contains(bar, "[2 Shorts]") {
+		t.Errorf("the current tab is marked:\n%s", bar)
 	}
-	m.handleKey(runeKey(']'))
-	m.handleKey(runeKey(']'))
+	m.handleKey(tabKey)
+	m.handleKey(tabKey)
+	m.handleKey(tabKey)
 	if m.channel.tab != youtube.ChannelPlaylists {
 		t.Fatalf("tab = %d", m.channel.tab)
 	}
-	m.handleKey(runeKey(']')) // wraps around
+	m.handleKey(tabKey) // wraps around
 	if m.channel.tab != youtube.ChannelVideos {
-		t.Fatalf("] after the last tab = %d, want the first", m.channel.tab)
+		t.Fatalf("Tab after the last tab = %d, want the first", m.channel.tab)
 	}
-	m.handleKey(runeKey('['))
+	m.handleKey(shiftTabKey)
 	if m.channel.tab != youtube.ChannelPlaylists {
-		t.Fatalf("[ on the first tab = %d, want the last", m.channel.tab)
+		t.Fatalf("Shift-Tab on the first tab = %d, want the last", m.channel.tab)
 	}
 
 	// A playlist of the channel opens inside it, and Esc comes back to the
@@ -1678,9 +1681,14 @@ func TestBracketsSwitchTheChannelTabAndEscComesBack(t *testing.T) {
 	if m.channel != nil || len(m.parents) != 2 || m.listTitle != "Other list" {
 		t.Fatalf("a playlist is not a channel: channel=%+v parents=%d title=%q", m.channel, len(m.parents), m.listTitle)
 	}
-	m.handleKey(runeKey(']'))
+	m.handleKey(shiftTabKey)
 	if m.status != "No channel open"+noteMark+"c opens the channel of a video" {
-		t.Errorf("] outside a channel: %q", m.status)
+		t.Errorf("Shift-Tab outside a channel: %q", m.status)
+	}
+	focus := m.focus
+	m.handleKey(tabKey)
+	if m.focus == focus && m.width >= wideWidth {
+		t.Error("Tab outside a channel still switches the pane")
 	}
 	m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
 	if m.channel == nil || m.channel.tab != youtube.ChannelPlaylists || m.selected != 1 || len(m.items) != 2 || len(m.parents) != 1 {
@@ -1719,7 +1727,7 @@ func TestAPastedChannelLinkOpensTheChannelWithoutAHistoryEntry(t *testing.T) {
 
 	// The name comes from the first result, and the list is not capped.
 	m.handleSearchEvent(youtube.Event{Kind: youtube.EventResult, Video: media.Video{ID: "video0001", Title: "One", Channel: "Google for Developers"}})
-	if m.channel.name != "Google for Developers" || !strings.Contains(m.renderHeader(), "Google for Developers") {
+	if m.channel.name != "Google for Developers" || !strings.Contains(m.renderHeader(), "@GoogleDevelopers") {
 		t.Errorf("name = %q", m.channel.name)
 	}
 	for i := 0; i < youtube.ResultLimit+5; i++ {
@@ -1806,22 +1814,400 @@ func TestTheChannelPageLimitsTheTabs(t *testing.T) {
 	if cmd := m.applyChannelInfo(channelInfoMsg{url: "https://www.youtube.com/@x", info: info}); cmd == nil || m.channel.tab != youtube.ChannelShorts {
 		t.Fatalf("the channel should open Shorts: %+v", m.channel)
 	}
-	if header := m.renderHeader(); !strings.Contains(header, "[Shorts] Playlists") || strings.Contains(header, "Videos") || strings.Contains(header, "Live") {
-		t.Errorf("only the tabs the channel has are shown:\n%s", header)
+	if bar := m.renderResultLines(60, 20); !strings.Contains(bar, "[1 Shorts]  2 Playlists") || strings.Contains(bar, "Videos") || strings.Contains(bar, "Live") {
+		t.Errorf("only the tabs the channel has are shown:\n%s", bar)
 	}
-	m.handleKey(runeKey(']'))
+	m.handleKey(tabKey)
 	if m.channel.tab != youtube.ChannelPlaylists {
-		t.Fatalf("] = %d, want Playlists", m.channel.tab)
+		t.Fatalf("Tab = %d, want Playlists", m.channel.tab)
 	}
-	m.handleKey(runeKey(']'))
+	m.handleKey(tabKey)
 	if m.channel.tab != youtube.ChannelShorts {
-		t.Fatalf("] wraps to %d, want Shorts", m.channel.tab)
+		t.Fatalf("Tab wraps to %d, want Shorts", m.channel.tab)
 	}
 
-	// With one tab, [ and ] say so.
+	// With one tab, Tab says so.
 	m.channel.tabs, m.channel.tab = []int{youtube.ChannelVideos}, youtube.ChannelVideos
-	if cmd := m.handleKey(runeKey(']')); cmd != nil || m.status != "This channel has only Videos" {
+	if cmd := m.handleKey(tabKey); cmd != nil || m.status != "This channel has only Videos" {
 		t.Errorf("one tab: %q", m.status)
 	}
 	m.cancel()
+}
+
+var (
+	tabKey      = tea.KeyMsg{Type: tea.KeyTab}
+	shiftTabKey = tea.KeyMsg{Type: tea.KeyShiftTab}
+)
+
+func TestAltDigitsJumpToAChannelTab(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 120, 30
+	m.items, m.ranks = []media.Video{{ID: "video0001", Title: "One", ChannelURL: "https://www.youtube.com/@x"}}, []int{0}
+	m.handleKey(runeKey('c'))
+	m.cancel()
+	m.channel.tabs = []int{youtube.ChannelVideos, youtube.ChannelPodcasts, youtube.ChannelPlaylists}
+
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}, Alt: true})
+	if m.channel.tab != youtube.ChannelPlaylists {
+		t.Fatalf("Alt+3 = tab %d, want Playlists", m.channel.tab)
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}, Alt: true})
+	if m.channel.tab != youtube.ChannelPodcasts {
+		t.Fatalf("Alt+2 = tab %d, want Podcasts", m.channel.tab)
+	}
+	generation := m.generation
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'9'}, Alt: true})
+	if m.channel.tab != youtube.ChannelPodcasts || m.generation != generation || !strings.Contains(m.status, "only 3 tabs") {
+		t.Errorf("a tab that does not exist: tab=%d status=%q", m.channel.tab, m.status)
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}, Alt: true})
+	if m.generation != generation {
+		t.Error("the open tab is not loaded again")
+	}
+	// A plain digit is still the count of a motion.
+	m.handleKey(runeKey('2'))
+	if m.channel.tab != youtube.ChannelPodcasts {
+		t.Error("a plain digit must not switch tabs")
+	}
+}
+
+func TestTheChannelHeaderShowsTheHandleAndTheTabBarTopsTheResultsPane(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 120, 30
+	m.items, m.ranks = []media.Video{{ID: "video0001", Title: "One", Channel: "The X", ChannelURL: "https://www.youtube.com/@TheX"}}, []int{0}
+	m.query = "golang"
+	height, page := m.bodyHeight(), m.pageSize()
+	m.handleKey(runeKey('c'))
+	m.cancel()
+
+	header := m.renderHeader()
+	if !strings.Contains(header, "golang › @TheX") || strings.Contains(header, "@ The X") {
+		t.Errorf("the header shows the handle:\n%s", header)
+	}
+	if lines := strings.Count(header, "\n") + 1; lines != 3 || m.bodyHeight() != height || m.pageSize() >= page {
+		t.Errorf("the bar is in the results pane: header lines=%d body %d -> %d, rows %d -> %d", lines, height, m.bodyHeight(), page, m.pageSize())
+	}
+	pane := strings.Split(m.renderResultLines(60, 20), "\n")
+	if len(pane) < 2 || !strings.Contains(pane[0], "[1 Videos]") || !strings.Contains(pane[1], "──") {
+		t.Errorf("the pane starts with the tabs and a rule:\n%v", pane)
+	}
+
+	// The page can give a handle the link did not have.
+	m2 := New("test")
+	m2.items, m2.ranks = []media.Video{{ID: "video0001", Title: "One", Channel: "The X", ChannelURL: testChannelURL}}, []int{0}
+	m2.handleKey(runeKey('c'))
+	m2.cancel()
+	m2.applyChannelInfo(channelInfoMsg{url: testChannelURL, info: youtube.ChannelInfo{ID: testChannelID, Handle: "@TheX", Tabs: []int{youtube.ChannelVideos}}})
+	if m2.channel.handle != "@TheX" {
+		t.Errorf("handle = %q", m2.channel.handle)
+	}
+}
+
+func TestAChannelRowShowsTheVerifiedMarkAndOneLineOfFacts(t *testing.T) {
+	v := channelResult()
+	v.ChannelVerified = true
+	if got := strings.Join(channelFacts(v), " · "); got != "@TiagoTaquelim · 46.3K subscribers" {
+		t.Errorf("facts = %q", got)
+	}
+	if got := channelTitle(v); got != "Tiago "+v.ChannelBadge() {
+		t.Errorf("title = %q", got)
+	}
+	m := New("test")
+	m.width, m.height = 120, 30
+	m.items, m.ranks = []media.Video{v}, []int{0}
+	if rows := m.renderResultLines(60, 10); !strings.Contains(rows, v.ChannelBadge()) || strings.Contains(rows, "channel ·") {
+		t.Errorf("the row:\n%s", rows)
+	}
+	if preview := m.renderPreview(50, 20); !strings.Contains(preview, "@TiagoTaquelim · 46.3K subscribers") || strings.Contains(preview, "CHANNEL") {
+		t.Errorf("the preview:\n%s", preview)
+	}
+	if got := strings.Join(channelFacts(media.Video{}), " "); got != "channel" {
+		t.Errorf("a channel without facts = %q", got)
+	}
+}
+
+func TestAChannelPictureIsSmallerThanAThumbnail(t *testing.T) {
+	if got := channelPictureRows(8); got != 5 {
+		t.Errorf("rows = %d, want 5", got)
+	}
+	if got := channelPictureRows(4); got != 3 || channelPictureRows(2) != 2 || channelPictureRows(0) != 0 {
+		t.Errorf("small sizes: %d %d %d", channelPictureRows(4), channelPictureRows(2), channelPictureRows(0))
+	}
+
+	m := New("test")
+	m.width, m.height = 120, 40
+	m.output.Mode = preview.ModeHalfBlocks
+	m.items, m.ranks = []media.Video{{ID: "video0001", Title: "One"}, channelResult()}, []int{0, 10}
+	_, videoWidth, videoRows, _ := m.previewGeometry()
+	m.selected = 1
+	_, width, rows, _ := m.previewGeometry()
+	if rows >= videoRows || width >= videoWidth || width != rows*2 {
+		t.Errorf("channel picture %dx%d, thumbnail %dx%d", width, rows, videoWidth, videoRows)
+	}
+}
+
+func TestMorePagesLoadNearTheEndOfAPlaylistAndStopWhenTheLastIsShort(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 120, 30
+	var starts []int
+	m.startListing("Opening playlist...", youtube.BrowsePageSize, func(_ context.Context, start int, emit func(youtube.Event)) {
+		starts = append(starts, start)
+	})
+	m.cancel()
+	for i := 0; i < youtube.BrowsePageSize; i++ {
+		m.handleSearchEvent(youtube.Event{Kind: youtube.EventResult, Video: media.Video{ID: fmt.Sprintf("vid%07d", i), Title: "V"}, Rank: i * 10})
+	}
+	m.handleSearchEvent(youtube.Event{Kind: youtube.EventSearchDone, Count: youtube.BrowsePageSize, More: true})
+	if len(m.items) != youtube.BrowsePageSize || m.pager == nil || m.pager.busy || m.pager.done || m.pager.next != 1+youtube.BrowsePageSize {
+		t.Fatalf("after the first page: items=%d pager=%+v", len(m.items), m.pager)
+	}
+
+	// Far from the end nothing loads.
+	m.selected = 5
+	if cmd := m.loadMore(); cmd != nil {
+		t.Fatal("a page was asked for far from the end")
+	}
+
+	// Near the end the next page starts after the first one, and the list keeps
+	// its rows and selection.
+	m.selected = len(m.items) - 3
+	selected := m.selected
+	cmd := m.loadMore()
+	if cmd == nil || !m.pager.busy || !m.searching || len(m.items) != youtube.BrowsePageSize || m.selected != selected {
+		t.Fatalf("loadMore: cmd=%v pager=%+v items=%d", cmd != nil, m.pager, len(m.items))
+	}
+	if m.loadMore() != nil {
+		t.Error("a second page was asked for while one is loading")
+	}
+	started, ok := cmd().(searchStartedMsg)
+	if !ok {
+		t.Fatal("loadMore should start a stream")
+	}
+	for range started.events { // ends when the loader has returned
+	}
+	if len(starts) != 1 || starts[0] != 1+youtube.BrowsePageSize {
+		t.Errorf("page starts = %v", starts)
+	}
+	m.cancel()
+
+	// The new rows go after the old ones, and a short page is the last.
+	m.handleSearchEvent(youtube.Event{Kind: youtube.EventResult, Video: media.Video{ID: "late0000001", Title: "L"}, Rank: youtube.BrowsePageSize * 10})
+	m.handleSearchEvent(youtube.Event{Kind: youtube.EventSearchDone, Count: 1, More: false})
+	if len(m.items) != youtube.BrowsePageSize+1 || m.items[len(m.items)-1].ID != "late0000001" || !m.pager.done || m.status != plural(len(m.items), "result") {
+		t.Fatalf("after the last page: items=%d pager=%+v status=%q", len(m.items), m.pager, m.status)
+	}
+	m.selected = len(m.items) - 1
+	if m.loadMore() != nil {
+		t.Error("nothing more to load")
+	}
+
+	// A new search is paged by its own page size, and keeps one page of results
+	// until the next is loaded.
+	m.beginSearch("something else")
+	m.cancel()
+	if m.pager == nil || m.pager.step != youtube.ResultLimit || m.resultCap != youtube.ResultLimit || m.cap() != youtube.ResultLimit {
+		t.Fatalf("a search is paged: pager=%+v cap=%d", m.pager, m.resultCap)
+	}
+	for i := 0; i < youtube.ResultLimit+5; i++ {
+		m.handleSearchEvent(youtube.Event{Kind: youtube.EventResult, Video: media.Video{ID: fmt.Sprintf("srch%07d", i), Title: "S"}, Rank: i * 10})
+	}
+	m.handleSearchEvent(youtube.Event{Kind: youtube.EventSearchDone, More: true})
+	if len(m.items) != youtube.ResultLimit {
+		t.Fatalf("a search page keeps its best %d results: %d", youtube.ResultLimit, len(m.items))
+	}
+	m.selected = len(m.items) - 1
+	if m.loadMore() == nil || m.resultCap != 2*youtube.ResultLimit {
+		t.Fatalf("the next page raises the cap: cap=%d", m.resultCap)
+	}
+	m.cancel()
+	for i := 0; i < 10; i++ {
+		m.handleSearchEvent(youtube.Event{Kind: youtube.EventResult, Video: media.Video{ID: fmt.Sprintf("late%07d", i), Title: "L"}, Rank: 1000 + i})
+	}
+	if len(m.items) != youtube.ResultLimit+10 {
+		t.Errorf("the second page adds its results: %d", len(m.items))
+	}
+
+	// A playlist opened from the search is not capped, and Esc brings the cap
+	// back.
+	m.searching = false
+	m.items[0].URL = "https://www.youtube.com/playlist?list=PLabcdef"
+	m.selected = 0
+	m.openPlaylist(m.items[0])
+	m.cancel()
+	if m.cap() != 0 {
+		t.Errorf("a playlist is not capped: %d", m.cap())
+	}
+	m.closePlaylist()
+	if m.cap() != youtube.ResultLimit || m.pager == nil || m.pager.busy || m.pager.done {
+		t.Errorf("the page that was loading is asked for again: cap=%d pager=%+v", m.cap(), m.pager)
+	}
+}
+
+func TestTheWholeDescriptionOfAChannelIsLoadedOnceWhenSelected(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 120, 40
+	v := channelResult()
+	v.Description = "The start of it..."
+	m.items, m.ranks = []media.Video{v, {ID: "video0001", Title: "One"}}, []int{0, 10}
+
+	// Selecting a channel only schedules the lookup, once.
+	if m.loadChannelDescription() == nil || m.channelDescs[v.ID] != 0 {
+		t.Fatalf("a lookup should wait for the selection to rest: %v", m.channelDescs)
+	}
+	if m.loadChannelDescription() != nil {
+		t.Error("the delay is scheduled once")
+	}
+	// A channel that was left in the meantime is not read.
+	m.selected = 1
+	if m.fetchChannelDescription(v.ID) != nil || m.channelDescs[v.ID] != 0 || m.descTick != "" {
+		t.Fatalf("a row that is not selected any more asks for nothing: %v", m.channelDescs)
+	}
+	m.selected = 0
+	m.loadChannelDescription()
+	cmd := m.fetchChannelDescription(v.ID)
+	if cmd == nil || m.channelDescs[v.ID] != descAsked {
+		t.Fatalf("the selected channel asks for its description: %v", m.channelDescs)
+	}
+	if m.loadChannelDescription() != nil || m.fetchChannelDescription(v.ID) != nil {
+		t.Error("the description is asked for once")
+	}
+	if preview := m.renderPreview(50, 30); strings.Contains(preview, "The start of it") == false {
+		t.Errorf("the snippet shows while the page loads:\n%s", preview)
+	}
+
+	long := strings.Repeat("A long line of the real description. ", 12)
+	m.applyChannelDescription(channelDescMsg{id: v.ID, text: long})
+	if m.items[0].Description != long || m.channelDescs[v.ID] != descDone {
+		t.Fatalf("the description is kept: %q %v", m.items[0].Description, m.channelDescs)
+	}
+	// It wraps and scrolls like a video description, instead of staying folded.
+	if lines := wrapDescription(m.items[0].Description, 40); len(lines) < 5 {
+		t.Errorf("lines = %d", len(lines))
+	}
+
+	// A page that cannot be read keeps the snippet, and a video asks for nothing.
+	m2 := New("test")
+	m2.items, m2.ranks = []media.Video{v}, []int{0}
+	m2.loadChannelDescription()
+	m2.fetchChannelDescription(v.ID)
+	m2.applyChannelDescription(channelDescMsg{id: v.ID, err: errors.New("offline")})
+	if m2.items[0].Description != "The start of it..." {
+		t.Errorf("description = %q", m2.items[0].Description)
+	}
+	m.selected = 1
+	if m.loadChannelDescription() != nil {
+		t.Error("a video has no channel description to load")
+	}
+}
+
+func TestAChannelPreviewHasNoBlankLineBetweenFactsAndDescription(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 120, 40
+	m.output.Mode = preview.ModeOff
+	v := channelResult()
+	v.Description = "About this channel"
+	m.items, m.ranks = []media.Video{v}, []int{0}
+
+	lines := strings.Split(m.renderPreview(50, 20), "\n")
+	facts := -1
+	for i, line := range lines {
+		if strings.Contains(line, "46.3K subscribers") {
+			facts = i
+		}
+	}
+	if facts < 0 || facts+3 >= len(lines) {
+		t.Fatalf("facts line at %d:\n%v", facts, lines)
+	}
+	if strings.TrimSpace(lines[facts+1]) != "" || !strings.Contains(lines[facts+2], "DESCRIPTION") {
+		t.Errorf("one blank line, then the description:\n%q\n%q", lines[facts+1], lines[facts+2])
+	}
+}
+
+func TestCoursesAndPodcastsHaveTheirOwnMarkAndLabel(t *testing.T) {
+	plain := playlistVideo()
+	course, podcast := plain, plain
+	course.PlaylistType, podcast.PlaylistType = media.PlaylistCourse, media.PlaylistPodcast
+
+	for _, tc := range []struct {
+		v           media.Video
+		mark, label string
+	}{
+		{plain, playlistMark, "PLAYLIST"},
+		{course, courseMark, "COURSE"},
+		{podcast, podcastMark, "PODCAST"},
+	} {
+		if got := playlistMarkOf(tc.v); got != tc.mark {
+			t.Errorf("%s mark = %q", tc.label, got)
+		}
+		if label, _ := badgeInfo(tc.v); label != tc.label {
+			t.Errorf("badge = %q, want %q", label, tc.label)
+		}
+	}
+	if courseMark == podcastMark || courseMark == playlistMark {
+		t.Error("the marks differ")
+	}
+
+	m := New("test")
+	m.width, m.height = 120, 30
+	m.items, m.ranks = []media.Video{course, podcast}, []int{0, 10}
+	rows := m.renderResultLines(60, 10)
+	if !strings.Contains(rows, courseMark) || !strings.Contains(rows, podcastMark) || !strings.Contains(rows, "COURSE") || !strings.Contains(rows, "PODCAST") {
+		t.Errorf("rows:\n%s", rows)
+	}
+	if preview := m.renderPreview(50, 20); !strings.Contains(preview, courseMark+" COURSE") {
+		t.Errorf("preview:\n%s", preview)
+	}
+}
+
+func TestLinkMessagesNameWhatTheResultIs(t *testing.T) {
+	course := playlistVideo()
+	course.PlaylistType = media.PlaylistCourse
+	for _, tc := range []struct {
+		v    media.Video
+		noun string
+	}{
+		{media.Video{ID: "video0001", URL: "https://www.youtube.com/watch?v=video0001"}, "video"},
+		{channelResult(), "channel"},
+		{playlistVideo(), "playlist"},
+		{course, "course"},
+	} {
+		m := New("test")
+		m.items, m.ranks = []media.Video{tc.v}, []int{0}
+		if got := m.linkNoun(); got != tc.noun {
+			t.Errorf("noun = %q, want %q", got, tc.noun)
+		}
+	}
+	if got := New("test").linkNoun(); got != "video" {
+		t.Errorf("no result: %q", got)
+	}
+}
+
+func TestAFailedPageIsAskedForAgainTwiceAndThenGivenUp(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 120, 30
+	m.startListing("Searching...", youtube.ResultLimit, func(context.Context, int, func(youtube.Event)) {})
+	m.cancel()
+	m.resultCap = youtube.ResultLimit
+	for i := 0; i < youtube.ResultLimit; i++ {
+		m.handleSearchEvent(youtube.Event{Kind: youtube.EventResult, Video: media.Video{ID: fmt.Sprintf("vid%07d", i), Title: "V"}, Rank: i * 10})
+	}
+	m.handleSearchEvent(youtube.Event{Kind: youtube.EventSearchDone, More: true})
+	m.selected = len(m.items) - 1
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		if m.loadMore() == nil {
+			t.Fatalf("attempt %d: the page should be asked for", attempt)
+		}
+		m.cancel()
+		if m.resultCap != 2*youtube.ResultLimit {
+			t.Fatalf("attempt %d: cap = %d", attempt, m.resultCap)
+		}
+		m.handleSearchEvent(youtube.Event{Kind: youtube.EventSearchDone, Err: errors.New("timed out")})
+		if m.pager.next != 1+youtube.ResultLimit || m.resultCap != youtube.ResultLimit {
+			t.Fatalf("attempt %d: a failed page keeps its place and the cap: next=%d cap=%d", attempt, m.pager.next, m.resultCap)
+		}
+	}
+	if !m.pager.done || m.loadMore() != nil {
+		t.Errorf("after two failures the list stops asking: %+v", m.pager)
+	}
 }

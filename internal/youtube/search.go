@@ -55,6 +55,9 @@ type Event struct {
 	// order, so the interface places each result by its rank instead of by
 	// arrival, which keeps YouTube's own ordering.
 	Rank int
+	// More is set on EventSearchDone of a page of a playlist or a channel tab
+	// that was full: the next page may have more entries.
+	More bool
 }
 
 // ranking turns the position of a result in its query into a Event.Rank:
@@ -221,7 +224,10 @@ func (c *topChannel) wait(ctx context.Context) string {
 
 type queryResult struct {
 	rows int
-	err  error
+	// listed is how many entries yt-dlp listed, whatever was left out of rows.
+	// A page is full when listed reaches its size.
+	listed int
+	err    error
 }
 
 // Search runs a normal relevance search alongside a live-oriented search and a
@@ -238,6 +244,30 @@ func Search(
 	loc locale.Locale,
 	emit func(Event),
 ) {
+	SearchPage(ctx, query, filters, hide, loc, 1, emit)
+}
+
+// SearchPage is Search for one page of the results, counted from 1: each source
+// lists the entries after those of the pages before it, and the ranks continue,
+// so a later page mixes in after an earlier one. The Shorts page has no pages,
+// so Shorts come with the first page only.
+func SearchPage(
+	ctx context.Context,
+	query string,
+	filters Filters,
+	hide []media.Kind,
+	loc locale.Locale,
+	page int,
+	emit func(Event),
+) {
+	page = max(page, 1)
+	// window is the entries of one source on this page: its start and end,
+	// counted from 1, for a page of n of them.
+	window := func(n int) (start, end int) { return (page-1)*n + 1, page * n }
+	// primary is how many entries the first source asks for, and primaryRows
+	// how many it got. A full page may have a next one.
+	primary, primaryRows := 0, 0
+
 	hidden := hiddenKinds(hide, filters)
 	query = strings.TrimSpace(query)
 
@@ -262,12 +292,18 @@ func Search(
 	if skipLive {
 		sources = 1
 	}
-	channel := newTopChannel(query, sources)
+	var channel *topChannel // only the first page boosts the stream of the channel
+	if page == 1 {
+		channel = newTopChannel(query, sources)
+	}
 
 	var queries []func() queryResult
 	if filters.Active() {
 		if filters.Type == TypeShorts {
 			queries = append(queries, func() queryResult {
+				if page > 1 {
+					return queryResult{} // one results page, no more
+				}
 				return runShortsQuery(
 					searchCtx,
 					query,
@@ -281,11 +317,14 @@ func Search(
 				)
 			})
 		} else if filters.Type == TypePlaylists {
+			start, end := window(filteredPlaylistCount)
+			primary = filteredPlaylistCount
 			queries = append(queries, func() queryResult {
-				return runEntryQuery(
+				return runEntryQueryFrom(
 					searchCtx,
 					resultsURL(query, filters),
-					filteredPlaylistCount,
+					start,
+					end,
 					loc,
 					mainRanking,
 					media.Video.IsPlaylist,
@@ -295,25 +334,29 @@ func Search(
 				)
 			})
 		} else if filters.Type == TypeChannels {
+			start, end := window(filteredChannelCount)
+			primary = filteredChannelCount
 			queries = append(queries, func() queryResult {
-				return runEntryQuery(
+				return runChannelQuery(
 					searchCtx,
 					resultsURL(query, filters),
-					filteredChannelCount,
+					start,
+					end,
 					loc,
-					mainRanking,
-					media.Video.IsChannel,
 					&seen,
 					&uniqueCount,
 					emit,
 				)
 			})
 		} else {
+			primary = fetchCount(filteredResultCount, hidden)
+			start, end := window(primary)
 			queries = append(queries, func() queryResult {
-				return runQuery(
+				return runQueryFrom(
 					searchCtx,
 					resultsURL(query, filters),
-					fetchCount(filteredResultCount, hidden),
+					start,
+					end,
 					loc,
 					mainRanking,
 					filters.Type == TypeLive,
@@ -326,11 +369,17 @@ func Search(
 			})
 		}
 	} else {
+		primary = fetchCount(videoResultCount, hidden)
+		mainStart, mainEnd := window(primary)
+		if page == 1 {
+			mainStart, mainEnd = 0, 0 // the search spec carries the count
+		}
 		queries = append(queries, func() queryResult {
-			return runQuery(
+			return runQueryFrom(
 				searchCtx,
-				fmt.Sprintf("ytsearch%d:%s", fetchCount(videoResultCount, hidden), query),
-				0,
+				fmt.Sprintf("ytsearch%d:%s", page*primary, query),
+				mainStart,
+				mainEnd,
 				loc,
 				mainRanking,
 				false,
@@ -342,14 +391,16 @@ func Search(
 			)
 		})
 		if !skipLive {
+			liveStart, liveEnd := window(liveResultCount)
 			queries = append(queries, func() queryResult {
 				// The results page filtered to live streams, in YouTube's own
 				// order. The normal search misses streams that YouTube shows
 				// in a "live now" card, and has no viewer-based order.
-				return runQuery(
+				return runQueryFrom(
 					searchCtx,
 					resultsURL(query, Filters{Type: TypeLive}),
-					liveResultCount,
+					liveStart,
+					liveEnd,
 					loc,
 					liveRanking,
 					true,
@@ -363,11 +414,13 @@ func Search(
 		}
 		// Hidden kinds are not even requested.
 		if !hidden[media.KindPlaylist] {
+			playlistStart, playlistEnd := window(playlistCount)
 			queries = append(queries, func() queryResult {
-				return runEntryQuery(
+				return runEntryQueryFrom(
 					searchCtx,
 					playlistSearchURL(query),
-					playlistCount,
+					playlistStart,
+					playlistEnd,
 					loc,
 					playlistRanking,
 					media.Video.IsPlaylist,
@@ -379,6 +432,9 @@ func Search(
 		}
 		if !hidden[media.KindShort] {
 			queries = append(queries, func() queryResult {
+				if page > 1 {
+					return queryResult{} // one results page, no more
+				}
 				// yt-dlp's search never returns Shorts, so they come from the
 				// Shorts results page.
 				return runShortsQuery(
@@ -393,6 +449,18 @@ func Search(
 					emit,
 				)
 			})
+		}
+	}
+
+	// The first query is the main one. The results below come in the order the
+	// queries finish, so it tells how many entries it got itself.
+	if primary > 0 && len(queries) > 0 {
+		main := queries[0]
+		queries[0] = func() queryResult {
+			result := main()
+			primaryRows = result.listed // read after searchWG.Wait
+
+			return result
 		}
 	}
 
@@ -429,7 +497,12 @@ func Search(
 		// Partial results are useful even if a slow search times out.
 		searchErr = fmt.Errorf("search timed out; showing partial results")
 	}
-	emit(Event{Kind: EventSearchDone, Count: int(uniqueCount.Load()), Err: searchErr})
+	emit(Event{
+		Kind:  EventSearchDone,
+		Count: int(uniqueCount.Load()),
+		Err:   searchErr,
+		More:  primary > 0 && primaryRows >= primary,
+	})
 
 	// The search does not look up details; the interface asks for those of the
 	// rows near the selection (see FetchDetailsBatch).
@@ -452,6 +525,26 @@ func runQuery(
 	uniqueCount *atomic.Int64,
 	emit func(Event),
 ) queryResult {
+	return runQueryFrom(ctx, source, 0, listEnd, loc, order, liveQuery, channel, hidden, seen, uniqueCount, emit)
+}
+
+// runQueryFrom is runQuery for the entries listStart to listEnd of source, both
+// counted from 1. A listStart of 0 starts at the first one. Ranks continue from
+// the entries before listStart, so a later page sorts after an earlier one.
+func runQueryFrom(
+	ctx context.Context,
+	source string,
+	listStart, listEnd int,
+	loc locale.Locale,
+	order ranking,
+	liveQuery bool,
+	channel *topChannel,
+	hidden map[media.Kind]bool,
+	seen *sync.Map,
+	uniqueCount *atomic.Int64,
+	emit func(Event),
+) queryResult {
+	offset := max(listStart-1, 0)
 	// A query that is done looking for the channel tells so, once; the
 	// channel is "none" only when all of them are done.
 	channelChecked := false
@@ -468,6 +561,9 @@ func runQuery(
 		"--skip-download", "--socket-timeout", "7",
 		"--extractor-retries", "1", "--retries", "1",
 		"--extractor-args", "youtubetab:approximate_date",
+	}
+	if listStart > 1 {
+		args = append(args, "--playlist-start", strconv.Itoa(listStart))
 	}
 	if listEnd > 0 {
 		args = append(args, "--playlist-end", strconv.Itoa(listEnd))
@@ -488,7 +584,7 @@ func runQuery(
 	}
 	lowPriority(cmd)
 
-	rows := 0
+	rows, listed := 0, 0
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
 	for scanner.Scan() {
@@ -499,6 +595,7 @@ func runQuery(
 		if err := json.Unmarshal(scanner.Bytes(), &video); err != nil || video.ID == "" {
 			continue
 		}
+		listed++
 		if video.IsChannel() {
 			// A channel is not a video and has no page here. Its ID tells which
 			// streams belong to the channel the user searched for.
@@ -507,7 +604,7 @@ func runQuery(
 			}
 			continue
 		}
-		position := rows
+		position := offset + rows
 		rows++
 		if rows >= channelLookahead {
 			checkedChannel() // no channel among the first results
@@ -551,7 +648,7 @@ func runQuery(
 	scanErr := scanner.Err()
 	waitErr := cmd.Wait()
 	if scanErr != nil {
-		return queryResult{rows: rows, err: scanErr}
+		return queryResult{rows: rows, listed: listed, err: scanErr}
 	}
 	if rows == 0 && waitErr != nil {
 		message := lastUsefulLine(stderr.String())
@@ -561,7 +658,7 @@ func runQuery(
 		return queryResult{err: errors.New(message)}
 	}
 
-	return queryResult{rows: rows}
+	return queryResult{rows: rows, listed: listed}
 }
 
 // playlistSearchURL is YouTube's results page filtered to playlists. The ytsearch
@@ -584,11 +681,31 @@ func runEntryQuery(
 	uniqueCount *atomic.Int64,
 	emit func(Event),
 ) queryResult {
+	return runEntryQueryFrom(ctx, source, 0, limit, loc, order, want, seen, uniqueCount, emit)
+}
+
+// runEntryQueryFrom is runEntryQuery for the entries start to limit of source,
+// counted from 1. A start of 0 starts at the first one.
+func runEntryQueryFrom(
+	ctx context.Context,
+	source string,
+	start, limit int,
+	loc locale.Locale,
+	order ranking,
+	want func(media.Video) bool,
+	seen *sync.Map,
+	uniqueCount *atomic.Int64,
+	emit func(Event),
+) queryResult {
+	offset := max(start-1, 0)
 	args := []string{
 		"--flat-playlist", "--dump-json", "--no-warnings", "--ignore-errors",
 		"--skip-download", "--socket-timeout", "7",
 		"--extractor-retries", "1", "--retries", "1",
 		"--playlist-end", strconv.Itoa(limit),
+	}
+	if start > 1 {
+		args = append(args, "--playlist-start", strconv.Itoa(start))
 	}
 	args = append(args, loc.YtDlpArgs()...)
 
@@ -605,7 +722,7 @@ func runEntryQuery(
 	}
 	lowPriority(cmd)
 
-	rows := 0
+	rows, listed := 0, 0
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
 	for scanner.Scan() {
@@ -613,13 +730,15 @@ func runEntryQuery(
 			break
 		}
 		var entry media.Video
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil ||
-			entry.ID == "" ||
-			!want(entry) {
+		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil || entry.ID == "" {
+			continue
+		}
+		listed++
+		if !want(entry) {
 			continue
 		}
 
-		position := rows
+		position := offset + rows
 		rows++
 
 		if _, duplicate := seen.LoadOrStore(entry.ID, struct{}{}); !duplicate {
@@ -635,7 +754,7 @@ func runEntryQuery(
 	scanErr := scanner.Err()
 	waitErr := cmd.Wait()
 	if scanErr != nil {
-		return queryResult{rows: rows, err: scanErr}
+		return queryResult{rows: rows, listed: listed, err: scanErr}
 	}
 	if rows == 0 && waitErr != nil {
 		message := lastUsefulLine(stderr.String())
@@ -645,7 +764,7 @@ func runEntryQuery(
 		return queryResult{err: errors.New(message)}
 	}
 
-	return queryResult{rows: rows}
+	return queryResult{rows: rows, listed: listed}
 }
 
 // playlistPreviewVideos is how many videos a playlist lookup lists.

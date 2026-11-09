@@ -35,6 +35,9 @@ type Video struct {
 	PlaylistUploader string `json:"playlist_uploader"`
 	// PlaylistChannelID is the ID of that channel.
 	PlaylistChannelID string `json:"playlist_channel_id"`
+	// PlaylistType tells a course or a podcast from a plain playlist. It is
+	// not in yt-dlp's data: ytwatch learns it from the page or tab it listed.
+	PlaylistType string `json:"-"`
 	// SubscriberCount is the number of subscribers, in a channel result.
 	SubscriberCount   int64   `json:"channel_follower_count"`
 	Duration          float64 `json:"duration"`
@@ -272,6 +275,12 @@ func (v Video) IsChannel() bool {
 	return false
 }
 
+// The values of Video.PlaylistType.
+const (
+	PlaylistCourse  = "course"
+	PlaylistPodcast = "podcast"
+)
+
 // channelID is the form of a channel ID, which is safe to put in an address.
 var channelID = regexp.MustCompile(`^UC[A-Za-z0-9_-]{22}$`)
 
@@ -371,13 +380,17 @@ func FormatDuration(duration float64) string {
 // PlaylistCountText is the number of videos in a playlist, such as "110
 // videos", or "" while it is unknown.
 func (v Video) PlaylistCountText() string {
+	noun := "video"
+	if v.PlaylistType == PlaylistCourse {
+		noun = "lesson"
+	}
 	switch {
 	case v.PlaylistCount <= 0:
 		return ""
 	case v.PlaylistCount == 1:
-		return "1 video"
+		return "1 " + noun
 	}
-	return fmt.Sprintf("%d videos", v.PlaylistCount)
+	return fmt.Sprintf("%d %ss", v.PlaylistCount, noun)
 }
 
 // UpdatedText says when a playlist last changed, such as "updated today", or

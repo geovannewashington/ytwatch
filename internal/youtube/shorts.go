@@ -255,5 +255,5 @@ func runShortsQuery(
 		})
 	}
 
-	return queryResult{rows: len(shorts)}
+	return queryResult{rows: len(shorts), listed: len(shorts)}
 }

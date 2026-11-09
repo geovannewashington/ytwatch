@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/geovannewashington/ytwatch/internal/media"
 	"github.com/geovannewashington/ytwatch/internal/theme"
 )
 
@@ -100,5 +101,36 @@ func equalizer(frame, n int) string {
 // screen.
 const playlistMark = "≡"
 
-// channelMark precedes the name of a channel, as the @ of its handle.
-const channelMark = "@"
+// courseMark and podcastMark are Nerd Font icons (a graduation cap and a
+// microphone) that replace playlistMark in front of a course or a podcast, as
+// the verified mark is one too. They are Material Design icons (Nerd Fonts
+// 3.0 and later), which fill more of the cell than the Font Awesome ones.
+const (
+	courseMark  = "\U000f0474" // nf-md-school
+	podcastMark = "\U000f036c" // nf-md-microphone
+)
+
+// playlistMarkOf is the symbol in front of the title of a playlist: a plain
+// playlist, a course or a podcast.
+func playlistMarkOf(v media.Video) string {
+	switch v.PlaylistType {
+	case media.PlaylistCourse:
+		return courseMark
+	case media.PlaylistPodcast:
+		return podcastMark
+	}
+
+	return playlistMark
+}
+
+// playlistLabelOf is the name of the kind of playlist, for its badge.
+func playlistLabelOf(v media.Video) string {
+	switch v.PlaylistType {
+	case media.PlaylistCourse:
+		return "COURSE"
+	case media.PlaylistPodcast:
+		return "PODCAST"
+	}
+
+	return "PLAYLIST"
+}
