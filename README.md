@@ -36,6 +36,9 @@ for finding new, ordinary content on purpose.
 
 - **One search for everything:** videos, Shorts, live streams and playlists,
   with filters. Paste a YouTube link to open it directly.
+- **Channels:** find one with the Channels filter, or press `c` on a video to
+  open its channel. It has tabs for Videos, Shorts, Live and Playlists. A
+  pasted channel link opens it too.
 - **Thumbnails** in any terminal: sharp in kitty and Ghostty, half-blocks
   elsewhere, real images with the optional `ueberzugpp`.
 - **Live chat**, also the chat replay of past streams, with pictures, badges,
@@ -76,7 +79,8 @@ ytwatch "Go interfaces"  # opens with a search
 |---|---|
 | `/` | Search (`r` repeats it, `f` sets filters) |
 | `j` `k` `h` `l` | Move / switch between results and preview |
-| `Enter` `s` | Play / play from the start |
+| `Enter` `s` | Play / play from the start (on a channel: open it) |
+| `c` `[` `]` | Open the channel of the video / previous and next channel tab |
 | `V` | Select several results, then `Enter` plays and `d` downloads them |
 | `d` `a` `Q` | Download / audio only / quality |
 | `o` `y` | Open / copy the link (`3o`: description link 3) |
@@ -88,8 +92,9 @@ mpv keeps playing if you quit ytwatch.
 
 No account, no telemetry. ytwatch talks only to YouTube's servers:
 `youtube.com`, `i.ytimg.com` and `googlevideo.com` (directly and through
-`yt-dlp` and `mpv`), and `ggpht.com` and `fonts.gstatic.com` for the pictures
-of the chat page. The one other place is GitHub, and only when you run
+`yt-dlp` and `mpv`), `yt3.ggpht.com` and `yt3.googleusercontent.com` for
+channel pictures, and `ggpht.com` and `fonts.gstatic.com` for the pictures of
+the chat page. The one other place is GitHub, and only when you run
 `ytwatch update`: it never checks by itself.
 
 It keeps your search history and where you stopped in each video for 30 days,

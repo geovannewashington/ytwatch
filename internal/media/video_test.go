@@ -261,3 +261,56 @@ func TestMergeDetailsKeepsTheChannelBadge(t *testing.T) {
 		t.Errorf("details without a badge must not remove it: %+v", kept)
 	}
 }
+
+func TestChannelResult(t *testing.T) {
+	data := []byte(`{"_type":"url","id":"UCZwW2PXNovXy_xUIhmYv7cg","title":"Tiago","channel":"Tiago",
+		"url":"https://www.youtube.com/channel/UCZwW2PXNovXy_xUIhmYv7cg","uploader_id":"@TiagoTaquelim",
+		"channel_follower_count":46300,
+		"thumbnails":[{"url":"//yt3.ggpht.com/a=s88","width":88},{"url":"//yt3.ggpht.com/a=s176","width":176},{"url":"//plain.example/x"}]}`)
+	var v Video
+	if err := json.Unmarshal(data, &v); err != nil {
+		t.Fatal(err)
+	}
+	if !v.IsChannel() || v.IsPlaylist() || v.Kind() != KindChannel {
+		t.Fatalf("want channel, got kind %v", v.Kind())
+	}
+	if got := v.SubscribersText(); got != "46.3K subscribers" {
+		t.Errorf("SubscribersText() = %q", got)
+	}
+	// Channel pictures come without a scheme; the largest comes first.
+	want := []string{"https://yt3.ggpht.com/a=s176", "https://yt3.ggpht.com/a=s88", "https://plain.example/x"}
+	if got := v.ThumbnailCandidates(); !reflect.DeepEqual(got, want) {
+		t.Errorf("thumbnail candidates = %v, want %v", got, want)
+	}
+	if got := v.ChannelPage(); got != "https://www.youtube.com/channel/UCZwW2PXNovXy_xUIhmYv7cg" {
+		t.Errorf("ChannelPage() = %q", got)
+	}
+	if _, hideable := ParseKind("channels"); hideable {
+		t.Error("channels cannot be hidden")
+	}
+	if (Video{ID: "video0001"}).IsChannel() {
+		t.Error("a plain video is not a channel")
+	}
+}
+
+func TestChannelPageOfAVideo(t *testing.T) {
+	const id = "UCZwW2PXNovXy_xUIhmYv7cg"
+	for name, tc := range map[string]struct {
+		video Video
+		want  string
+	}{
+		"channel URL":    {Video{ID: "video0001", ChannelURL: "https://www.youtube.com/@x"}, "https://www.youtube.com/@x"},
+		"channel ID":     {Video{ID: "video0001", ChannelID: id}, "https://www.youtube.com/channel/" + id},
+		"URL wins":       {Video{ID: "video0001", ChannelURL: "https://www.youtube.com/@x", ChannelID: id}, "https://www.youtube.com/@x"},
+		"nothing":        {Video{ID: "video0001"}, ""},
+		"odd channel ID": {Video{ID: "video0001", ChannelID: "../etc"}, ""},
+		"not a web link": {Video{ID: "video0001", ChannelURL: "javascript:alert(1)"}, ""},
+	} {
+		if got := tc.video.ChannelPage(); got != tc.want {
+			t.Errorf("%s: ChannelPage() = %q, want %q", name, got, tc.want)
+		}
+	}
+	if (Video{}).SubscribersText() != "" || (Video{SubscriberCount: 1}).SubscribersText() != "1 subscriber" {
+		t.Error("SubscribersText is wrong")
+	}
+}

@@ -42,16 +42,19 @@ func (m *Model) inSelection(i int) bool {
 
 // skipped counts the results left out of a selection, by reason.
 type skipped struct {
-	playlists, live, unplayable int
+	playlists, channels, live, unplayable int
 }
 
-func (s skipped) total() int { return s.playlists + s.live + s.unplayable }
+func (s skipped) total() int { return s.playlists + s.channels + s.live + s.unplayable }
 
 // text says what was skipped, such as "skipped 2 playlists, 1 live stream".
 func (s skipped) text() string {
 	var parts []string
 	if s.playlists > 0 {
 		parts = append(parts, plural(s.playlists, "playlist"))
+	}
+	if s.channels > 0 {
+		parts = append(parts, plural(s.channels, "channel"))
 	}
 	if s.live > 0 {
 		parts = append(parts, plural(s.live, "live stream"))
@@ -88,6 +91,8 @@ func (m *Model) selectedVideos(forDownload bool) ([]media.Video, skipped) {
 		switch {
 		case v.IsPlaylist():
 			skip.playlists++
+		case v.IsChannel():
+			skip.channels++
 		case v.CanonicalURL() == "":
 			skip.unplayable++
 		case v.IsUpcoming() || (forDownload && v.IsCurrentlyLive()):
@@ -104,7 +109,7 @@ func (m *Model) selectedVideos(forDownload bool) ([]media.Video, skipped) {
 func (m *Model) visualStatus() string {
 	lo, hi := m.selection()
 	text := "-- VISUAL -- " + fmt.Sprintf("%d selected", hi-lo+1)
-	if _, skip := m.selectedVideos(false); skip.playlists > 0 {
+	if _, skip := m.selectedVideos(false); skip.playlists+skip.channels > 0 {
 		text += " (" + skip.text() + ")"
 	}
 

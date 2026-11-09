@@ -53,6 +53,13 @@ type searchEventMsg struct {
 
 type searchClosedMsg struct{ generation int }
 
+// channelInfoMsg is what the page of the channel at url says about it.
+type channelInfoMsg struct {
+	url  string
+	info youtube.ChannelInfo
+	err  error
+}
+
 // prefetchDelayMsg fires when a row has stayed selected for a moment; the
 // thumbnails of its neighbors are then downloaded ahead of time.
 type prefetchDelayMsg struct {
@@ -186,6 +193,7 @@ type Model struct {
 	visual       bool           // a line selection is active (V)
 	parents      []resultsState // the results to go back to from an open playlist
 	listTitle    string         // title of the open playlist, empty for search results
+	channel      *channelView   // the open channel, nil outside a channel
 	visualAnchor int            // where the selection started
 	qualityDraft int
 	filterDraft  youtube.Filters // edited in the menu, applied with Enter
@@ -380,15 +388,19 @@ func (m *Model) beginSearch(query string) tea.Cmd {
 	m.query = query
 	m.setInput(query)
 	m.searchMode = false
-	m.parents, m.listTitle = nil, ""
+	m.parents, m.listTitle, m.channel = nil, "", nil
 
-	// A pasted link shows that video or playlist. It is not a search, so it
-	// stays out of the history and the filters do not apply.
+	// A pasted link shows that video, playlist or channel. It is not a search,
+	// so it stays out of the history and the filters do not apply.
 	if link, ok := youtube.ParseLink(query); ok {
 		if link.VideoID != "" {
 			return m.startStream("Opening video...", func(ctx context.Context, emit func(youtube.Event)) {
 				youtube.Lookup(ctx, link.VideoID, loc, emit)
 			})
+		}
+		if link.Channel != "" {
+			m.channel = &channelView{url: link.ChannelURL()}
+			return tea.Batch(m.startChannelTab(), m.fetchChannelInfo())
 		}
 		url := link.PlaylistURL()
 		return m.startStream("Opening playlist...", func(ctx context.Context, emit func(youtube.Event)) {
@@ -488,6 +500,158 @@ type resultsState struct {
 	// partial is set when the results were still arriving when the playlist
 	// was opened, which stops them.
 	partial bool
+	// channel is the channel the results were listing, when they were a tab.
+	channel *channelView
+}
+
+// channelView is an open channel: the address of its page, its name and ID
+// (empty until the page tells them) and the tab being listed, a
+// youtube.Channel* value.
+type channelView struct {
+	url  string
+	name string
+	id   string
+	tab  int
+	// tabs are the tabs the channel has, nil until its page tells.
+	tabs []int
+}
+
+// available lists the tabs that can be opened: all of them until the page of
+// the channel tells which ones it has.
+func (c *channelView) available() []int {
+	if c.tabs != nil {
+		return c.tabs
+	}
+	all := make([]int, len(youtube.ChannelTabs))
+	for i := range all {
+		all[i] = i
+	}
+	return all
+}
+
+// owns reports whether v is this channel or belongs to it.
+func (c *channelView) owns(v media.Video) bool {
+	id := v.ChannelID
+	if v.IsChannel() {
+		id = v.ID
+	}
+	return c.id != "" && id == c.id || v.ChannelPage() == c.url
+}
+
+// fetchChannelInfo reads the page of the open channel, for its tabs.
+func (m *Model) fetchChannelInfo() tea.Cmd {
+	ctx, url, loc := m.ctx, m.channel.url, m.locale()
+	return func() tea.Msg {
+		info, err := youtube.FetchChannelInfo(ctx, url, loc)
+		return channelInfoMsg{url: url, info: info, err: err}
+	}
+}
+
+// applyChannelInfo keeps what the page of the channel says. When the channel
+// does not have the tab on screen, it opens its first tab instead.
+func (m *Model) applyChannelInfo(msg channelInfoMsg) tea.Cmd {
+	if msg.err != nil || m.channel == nil || m.channel.url != msg.url {
+		return nil // without the page every tab is offered
+	}
+	c := m.channel
+	c.id = msg.info.ID
+	if c.name == "" {
+		c.name = clean(msg.info.Name)
+	}
+	if len(msg.info.Tabs) == 0 {
+		return nil
+	}
+	c.tabs = msg.info.Tabs
+	if slices.Contains(c.tabs, c.tab) {
+		return nil
+	}
+	c.tab = c.tabs[0]
+	return m.startChannelTab()
+}
+
+// pushResults remembers the list on screen, to return to it with Esc.
+func (m *Model) pushResults() {
+	saved := resultsState{
+		items:    m.items,
+		ranks:    m.ranks,
+		selected: m.selected,
+		top:      m.top,
+		title:    m.listTitle,
+		partial:  m.searching,
+	}
+	if m.channel != nil {
+		c := *m.channel
+		saved.channel = &c
+	}
+	m.parents = append(m.parents, saved)
+}
+
+// openChannel lists the videos of the channel at url, on its first tab. Esc
+// returns to the results. name and id are empty when they are not known.
+func (m *Model) openChannel(url, name, id string) tea.Cmd {
+	m.pushResults()
+	m.listTitle = ""
+	m.channel = &channelView{url: url, name: clean(name), id: id}
+
+	return tea.Batch(m.startChannelTab(), m.fetchChannelInfo())
+}
+
+// startChannelTab lists the current tab of the open channel in place of the
+// list on screen.
+func (m *Model) startChannelTab() tea.Cmd {
+	c, loc := *m.channel, m.locale()
+	tab := youtube.ChannelTabs[c.tab]
+
+	return m.startStream("Opening "+strings.ToLower(tab)+"...", func(ctx context.Context, emit func(youtube.Event)) {
+		youtube.BrowseChannel(ctx, c.url, c.tab, c.name, loc, emit)
+	})
+}
+
+// switchChannelTab moves step tabs, wrapping around, through the tabs the open
+// channel has.
+func (m *Model) switchChannelTab(step int) tea.Cmd {
+	if m.channel == nil {
+		m.status = "No channel open" + noteMark + "c opens the channel of a video"
+		return nil
+	}
+	tabs := m.channel.available()
+	if len(tabs) == 1 && tabs[0] == m.channel.tab {
+		m.status = "This channel has only " + youtube.ChannelTabs[m.channel.tab]
+		return nil
+	}
+	n := len(tabs)
+	at := max(slices.Index(tabs, m.channel.tab), 0)
+	m.channel.tab = tabs[(at+step+n)%n]
+
+	return m.startChannelTab()
+}
+
+// openSelectedChannel opens the channel of the selected result: the result
+// itself when it is a channel.
+func (m *Model) openSelectedChannel() tea.Cmd {
+	v, ok := m.selectedVideo()
+	if !ok {
+		m.status = "No result selected"
+		return nil
+	}
+
+	url := v.ChannelPage()
+	if url == "" {
+		m.status = "No channel link for this video"
+		return nil
+	}
+
+	if m.channel != nil && m.channel.owns(v) {
+		m.status = "Already in this channel" + noteMark + "[ ] change tabs"
+		return nil
+	}
+
+	name, id := v.Channel, v.ChannelID
+	if v.IsChannel() {
+		name, id = v.Title, v.ID
+	}
+
+	return m.openChannel(url, name, id)
 }
 
 // openPlaylist lists the videos of playlist v. Esc returns to the results.
@@ -497,14 +661,8 @@ func (m *Model) openPlaylist(v media.Video) tea.Cmd {
 		m.status = "No link for this playlist"
 		return nil
 	}
-	m.parents = append(m.parents, resultsState{
-		m.items,
-		m.ranks,
-		m.selected,
-		m.top,
-		m.listTitle,
-		m.searching,
-	})
+	m.pushResults()
+	m.channel = nil
 	m.listTitle = clean(v.Title)
 	loc := m.locale()
 
@@ -515,7 +673,8 @@ func (m *Model) openPlaylist(v media.Video) tea.Cmd {
 	return cmd
 }
 
-// closePlaylist goes back to the results the playlist was opened from.
+// closePlaylist goes back to the results the playlist or channel was opened
+// from.
 func (m *Model) closePlaylist() tea.Cmd {
 	if len(m.parents) == 0 {
 		return nil
@@ -530,6 +689,7 @@ func (m *Model) closePlaylist() tea.Cmd {
 	last := m.parents[len(m.parents)-1]
 	m.parents = m.parents[:len(m.parents)-1]
 	m.items, m.ranks, m.selected, m.top, m.listTitle = last.items, last.ranks, last.selected, last.top, last.title
+	m.channel = last.channel
 	m.searching, m.searchDone, m.metadataDone, m.searchError = false, true, true, ""
 	m.endVisual()
 	m.status = m.resultsStatus()
@@ -632,6 +792,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds := m.handleSearchEvent(msg.event)
 		cmds = append(cmds, waitSearchEvent(msg.generation, m.searchEvents))
 		return m, tea.Batch(cmds...)
+
+	case channelInfoMsg:
+		return m, m.applyChannelInfo(msg)
 
 	case searchClosedMsg:
 		if msg.generation == m.generation {
@@ -886,7 +1049,7 @@ func (m *Model) insertResult(v media.Video, rank int) []tea.Cmd {
 
 	// A search shows its best ResultLimit results. Inside a playlist the list
 	// is the playlist, whatever its size.
-	capped := len(m.parents) == 0
+	capped := len(m.parents) == 0 && m.channel == nil
 	if capped && at >= youtube.ResultLimit {
 		return nil
 	}
@@ -949,6 +1112,14 @@ func (m *Model) trimResults() {
 func (m *Model) handleSearchEvent(event youtube.Event) []tea.Cmd {
 	switch event.Kind {
 	case youtube.EventResult:
+		if c := m.channel; c != nil {
+			if c.name == "" {
+				c.name = clean(event.Video.Channel)
+			}
+			if c.id == "" {
+				c.id = event.Video.ChannelID
+			}
+		}
 		for _, existing := range m.items {
 			if existing.ID == event.Video.ID {
 				return nil
@@ -1459,12 +1630,24 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	case "B":
 		v, ok := m.selectedVideo()
-		if !ok || !v.IsPlaylist() {
-			m.status = "B browses a playlist"
+		switch {
+		case ok && v.IsChannel():
+			return m.openSelectedChannel()
+		case !ok || !v.IsPlaylist():
+			m.status = "B browses a playlist or a channel"
 			return nil
 		}
 
 		return m.openPlaylist(v)
+
+	case "c":
+		return m.openSelectedChannel()
+
+	case "[":
+		return m.switchChannelTab(-1)
+
+	case "]":
+		return m.switchChannelTab(1)
 
 	case "d":
 		return m.downloadSelected()
@@ -1699,7 +1882,7 @@ func (m *Model) detailTargets() []media.Video {
 		}
 
 		v := m.items[index]
-		if v.Detailed || m.detailsAsked[v.ID] || (offset != 0 && v.IsPlaylist()) {
+		if v.Detailed || m.detailsAsked[v.ID] || v.IsChannel() || (offset != 0 && v.IsPlaylist()) {
 			return
 		}
 
@@ -2186,6 +2369,10 @@ func (m *Model) playSelectedFrom(startOver bool) tea.Cmd {
 		return nil
 	}
 
+	if v.IsChannel() {
+		return m.openSelectedChannel()
+	}
+
 	if v.CanonicalURL() == "" {
 		m.status = "No link for this result"
 		return nil
@@ -2322,6 +2509,11 @@ func (m *Model) downloadSelected() tea.Cmd {
 			return nil
 		}
 
+		if v.IsChannel() {
+			m.status = "Channels can't be downloaded" + noteMark + "Enter to open it"
+			return nil
+		}
+
 		if v.IsCurrentlyLive() || v.IsUpcoming() {
 			m.status = "Live and upcoming streams can't be downloaded"
 			return nil
@@ -2450,6 +2642,12 @@ func (m *Model) keyHints() string {
 		return "Enter search · Esc cancel · Up/Down past searches · Ctrl+U clear"
 	case m.visual:
 		return "j/k extend · Enter play · d download · Esc cancel"
+	case m.channel != nil && !hasSelection:
+		return "[ ] tabs · Esc back · / search · ? help"
+	case m.channel != nil && v.IsPlaylist():
+		return "j/k move · Enter play all · B browse · [ ] tabs · Esc back · ? help"
+	case m.channel != nil:
+		return "j/k move · Enter play · d download · [ ] tabs · Esc back · ? help"
 	case len(m.parents) > 0 && !hasSelection:
 		return "Esc back to results · / search · ? help"
 	case len(m.parents) > 0:
@@ -2458,9 +2656,11 @@ func (m *Model) keyHints() string {
 		return "/ search · f filters · ? help · q quit"
 	case v.IsPlaylist():
 		return "j/k move · Enter play all · B browse · V select · / search · ? help"
+	case v.IsChannel():
+		return "j/k move · Enter open channel · / search · f filters · ? help"
 	}
 
-	return "j/k move · Enter play · d download · V select · / search · f filters · ? help"
+	return "j/k move · Enter play · d download · c channel · V select · / search · f filters · ? help"
 }
 
 func (m *Model) renderHeader() string {
@@ -2474,6 +2674,8 @@ func (m *Model) renderHeader() string {
 		searchLine += renderInput(m.searchInput, m.searchCursor, max(10, m.width-8))
 	case m.query == "":
 		searchLine += helpStyle.Render("press / to search")
+	case m.channel != nil:
+		searchLine += m.channelLine(max(10, m.width-8))
 	case m.listTitle != "":
 		room := max(10, m.width-8)
 		searchLine += truncate(m.query, room/3) + metaStyle.Render(" › ") +
@@ -2496,6 +2698,45 @@ func (m *Model) renderHeader() string {
 		lipgloss.NewStyle().Width(m.width).Render(searchLine),
 		center(helpStyle.Render(truncate(keys, m.width))),
 	)
+}
+
+// channelLine is the search line in a channel: the search the channel was found
+// with, the channel's name and its tabs with the current one in brackets.
+func (m *Model) channelLine(room int) string {
+	tabs := channelTabsText(m.channel.available(), m.channel.tab, false)
+	if room < lipgloss.Width(tabs)+24 {
+		tabs = channelTabsText(m.channel.available(), m.channel.tab, true)
+	}
+
+	name := m.channel.name
+	if name == "" {
+		name = strings.TrimPrefix(m.channel.url, "https://www.youtube.com/")
+	}
+
+	rest := room - lipgloss.Width(tabs) - 2
+	queryRoom := min(lipgloss.Width(m.query), max(1, rest/3))
+	nameRoom := max(1, rest-queryRoom-3-len(channelMark)-1)
+
+	return truncate(m.query, queryRoom) + metaStyle.Render(" › ") +
+		playlistBadgeStyle.Render(channelMark+" ") + truncate(name, nameRoom) +
+		"  " + helpStyle.Render(tabs)
+}
+
+// channelTabsText lists the tabs of a channel with the one at current in
+// brackets. Compact lists only that one.
+func channelTabsText(available []int, current int, compact bool) string {
+	var tabs []string
+	for _, i := range available {
+		name := youtube.ChannelTabs[i]
+		switch {
+		case i == current:
+			tabs = append(tabs, "["+name+"]")
+		case !compact:
+			tabs = append(tabs, name)
+		}
+	}
+
+	return strings.Join(tabs, " ")
 }
 
 func (m *Model) renderBody() string {
@@ -2626,7 +2867,9 @@ func (m *Model) renderResultLines(width, height int) string {
 		if text, ok := durationPart(v); ok {
 			meta += " · " + text
 		}
-		if v.IsPlaylist() {
+		if v.IsChannel() {
+			meta = strings.Join(channelFacts(v), " · ")
+		} else if v.IsPlaylist() {
 			meta = strings.Join(
 				append([]string{channelText(v), "playlist"}, playlistFacts(v)...),
 				" · ",
@@ -2695,6 +2938,8 @@ func (m *Model) renderEmptyList(width, height int) []string {
 		message = "Type your search and press Enter"
 	case m.searchError != "":
 		message, mood = "Search failed: "+m.searchError, moodSad
+	case m.searching && m.channel != nil:
+		message, mood = "Opening the channel...", moodSearching
 	case m.searching && len(m.parents) > 0:
 		message, mood = "Opening the playlist...", moodSearching
 	case m.searching:
@@ -2767,9 +3012,35 @@ func (m *Model) streamSection(v media.Video, width int) ([]string, lipgloss.Styl
 		}
 
 		return append(lines, "Enter plays all · B browses"), playlistBadgeStyle
+
+	case media.KindChannel:
+		return []string{channelMark + " CHANNEL", "Enter opens its videos"}, playlistBadgeStyle
 	}
 
 	return nil, metaStyle
+}
+
+// channelHandle is the @handle of a channel result, or "channel" without one.
+func channelHandle(v media.Video) string {
+	if strings.HasPrefix(v.UploaderID, "@") {
+		return clean(v.UploaderID)
+	}
+
+	return "channel"
+}
+
+// channelFacts is the line of a channel in the list: its handle, "channel" and
+// its number of subscribers when known.
+func channelFacts(v media.Video) []string {
+	facts := []string{"channel"}
+	if strings.HasPrefix(v.UploaderID, "@") {
+		facts = []string{clean(v.UploaderID), "channel"}
+	}
+	if subs := v.SubscribersText(); subs != "" {
+		facts = append(facts, subs)
+	}
+
+	return facts
 }
 
 // playlistFacts lists what is known about a playlist: its size and when it
@@ -2828,7 +3099,11 @@ func (m *Model) renderPreview(width, height int) string {
 	} else {
 		lines = append(lines, "")
 		lines = append(lines, m.marqueeText(clean(v.Title), width))
-		lines = append(lines, metaStyle.Render(truncate(channelText(v), width)))
+		if v.IsChannel() {
+			lines = append(lines, metaStyle.Render(truncate(channelHandle(v), width)))
+		} else {
+			lines = append(lines, metaStyle.Render(truncate(channelText(v), width)))
+		}
 
 		var stats []string
 		// A stream on air is announced by the section below, so only the
@@ -2858,6 +3133,13 @@ func (m *Model) renderPreview(width, height int) string {
 			}
 		}
 
+		if v.IsChannel() {
+			stats = []string{"channel"}
+			if subs := v.SubscribersText(); subs != "" {
+				stats = []string{subs}
+			}
+		}
+
 		lines = append(lines, metaStyle.Render(truncate(strings.Join(stats, " · "), width)))
 
 		if bar := m.previewProgress(v, width); bar != "" && !v.IsPlaylist() {
@@ -2877,7 +3159,7 @@ func (m *Model) renderPreview(width, height int) string {
 
 		description := strings.TrimSpace(v.Description)
 		if description == "" {
-			if !v.Detailed && !m.detailsFailed[v.ID] {
+			if !v.Detailed && !m.detailsFailed[v.ID] && !v.IsChannel() {
 				description = "Loading details..."
 			} else {
 				description = "No description"
@@ -3096,7 +3378,11 @@ func (m *Model) renderFilters() string {
 
 	// The help is always one line, so the box keeps its size between columns.
 	help := youtube.Rows[m.filterCol].Help
-	if m.filterCol == youtube.RowDate && m.filterDraft.DateIgnored() {
+	switch {
+	case m.filterCol == youtube.RowDate && m.filterDraft.Type == youtube.TypeChannels,
+		m.filterCol == youtube.RowDuration && m.filterDraft.DurationIgnored():
+		help = "Channels have no length or date, so this is ignored."
+	case m.filterCol == youtube.RowDate && m.filterDraft.DateIgnored():
 		help = "YouTube has no date filter for Shorts, so it is ignored."
 	}
 
@@ -3115,6 +3401,7 @@ func (m *Model) renderHelp() string {
 		{"j k", "Move through the results"},
 		{"h l", "Switch between the results and the preview"},
 		{"Enter  B", "Play (all of a playlist) / browse a playlist"},
+		{"c  [  ]", "Open the channel of a video / switch the channel tabs"},
 		{"s", "Play from the start a video that was left halfway"},
 		{"Esc", "Back · quits on the main page"},
 		{"/  r", "Edit the search (Up/Down: past ones) / repeat it"},
@@ -3182,6 +3469,8 @@ func badgeInfo(v media.Video) (string, lipgloss.Style) {
 		return "⚡ SHORT", shortBadgeStyle
 	case media.KindPlaylist:
 		return "PLAYLIST", playlistBadgeStyle
+	case media.KindChannel:
+		return "CHANNEL", playlistBadgeStyle
 	default:
 		return "", metaStyle
 	}

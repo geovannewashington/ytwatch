@@ -40,7 +40,6 @@ func TestParseLinkLeavesEverythingElseToTheSearch(t *testing.T) {
 		"go tutorial",
 		"youtube.com",
 		"https://www.youtube.com/",
-		"https://www.youtube.com/@channel",
 		"https://www.youtube.com/watch?v=short",
 		"https://www.youtube.com/watch?v=dQw4w9WgXcQ--exec",
 		"https://www.youtube.com/watch?v=--exec=rm",
@@ -50,9 +49,43 @@ func TestParseLinkLeavesEverythingElseToTheSearch(t *testing.T) {
 		"https://youtube.com.evil.example/watch?v=dQw4w9WgXcQ",
 		"ftp://youtube.com/watch?v=dQw4w9WgXcQ",
 		"https://youtu.be/",
+		"@GoogleDevelopers",
+		"https://www.youtube.com/@",
+		"https://www.youtube.com/@ab",
+		"https://www.youtube.com/@bad%20name",
+		"https://www.youtube.com/@a/b/c",
+		"https://www.youtube.com/@GoogleDevelopers/secret",
+		"https://www.youtube.com/@a$(rm)",
+		"https://www.youtube.com/channel/UCshort",
+		"https://www.youtube.com/channel/UC_x5XG1OV2P6uZZ5FSM9Ttw/extra/videos",
+		"https://www.youtube.com/channel/",
+		"https://www.youtube.com/c/",
+		"https://www.youtube.com/user/bad%2Fname",
+		"https://example.com/@GoogleDevelopers",
 	} {
 		if got, ok := ParseLink(input); ok {
 			t.Errorf("ParseLink(%q) = %+v, want no link", input, got)
+		}
+	}
+}
+
+func TestParseLinkReadsChannelLinks(t *testing.T) {
+	for input, want := range map[string]string{
+		"https://www.youtube.com/@GoogleDevelopers":                          "https://www.youtube.com/@GoogleDevelopers",
+		"youtube.com/@GoogleDevelopers/videos":                               "https://www.youtube.com/@GoogleDevelopers",
+		"https://m.youtube.com/@tiago.temporin/shorts":                       "https://www.youtube.com/@tiago.temporin",
+		"https://www.youtube.com/@a-b_c/streams":                             "https://www.youtube.com/@a-b_c",
+		"https://www.youtube.com/@GoogleDevelopers/live":                     "https://www.youtube.com/@GoogleDevelopers",
+		"https://www.youtube.com/@GoogleDevelopers/":                         "https://www.youtube.com/@GoogleDevelopers",
+		"https://www.youtube.com/channel/UC_x5XG1OV2P6uZZ5FSM9Ttw":           "https://www.youtube.com/channel/UC_x5XG1OV2P6uZZ5FSM9Ttw",
+		"https://www.youtube.com/channel/UC_x5XG1OV2P6uZZ5FSM9Ttw/playlists": "https://www.youtube.com/channel/UC_x5XG1OV2P6uZZ5FSM9Ttw",
+		"https://www.youtube.com/c/GoogleDevelopers":                         "https://www.youtube.com/c/GoogleDevelopers",
+		"https://www.youtube.com/user/google/videos":                         "https://www.youtube.com/user/google",
+		"https://www.youtube.com/@кино":                                      "https://www.youtube.com/@%D0%BA%D0%B8%D0%BD%D0%BE",
+	} {
+		got, ok := ParseLink(input)
+		if !ok || got.Channel == "" || got.VideoID != "" || got.PlaylistID != "" || got.ChannelURL() != want {
+			t.Errorf("ParseLink(%q) = %+v, %v; want the channel %s", input, got, ok, want)
 		}
 	}
 }

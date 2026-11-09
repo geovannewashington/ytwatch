@@ -99,3 +99,6 @@ func equalizer(frame, n int) string {
 // the width libraries count one, which shifted those rows and corrupted the
 // screen.
 const playlistMark = "≡"
+
+// channelMark precedes the name of a channel, as the @ of its handle.
+const channelMark = "@"
