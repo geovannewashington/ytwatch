@@ -896,6 +896,15 @@ mp.register_event("shutdown", function()
     remove_thumb()
 end)
 
+-- mpv writes the position of a video only when it quits. A mpv that is killed
+-- or crashes would lose it, so it is written every half minute while playing.
+-- It does nothing unless ytwatch asked mpv to save positions.
+mp.add_periodic_timer(30, function()
+    if not mp.get_property_native("save-position-on-quit") then return end
+    if state.paused or not mp.get_property_native("time-pos") then return end
+    mp.command("write-watch-later-config")
+end)
+
 mp.add_periodic_timer(1 / 30, function()
     local ok, err = pcall(tick)
     if not ok then

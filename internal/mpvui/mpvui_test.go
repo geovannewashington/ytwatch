@@ -204,3 +204,12 @@ func TestSafeOptionRefusesWhatSplitsAnOption(t *testing.T) {
 		t.Error("a plain path is fine")
 	}
 }
+
+func TestTheScriptSavesThePositionNowAndThenWhenAskedTo(t *testing.T) {
+	src := string(script)
+	for _, want := range []string{"write-watch-later-config", "save-position-on-quit", "add_periodic_timer(30"} {
+		if !strings.Contains(src, want) {
+			t.Errorf("the script should contain %q", want)
+		}
+	}
+}
