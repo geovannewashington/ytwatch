@@ -37,8 +37,9 @@ for finding new, ordinary content on purpose.
 - **One search for everything:** videos, Shorts, live streams and playlists,
   with filters. Paste a YouTube link to open it directly.
 - **Channels:** find one with the Channels filter, or press `c` on a video to
-  open its channel. It has tabs for Videos, Shorts, Live and Playlists. A
-  pasted channel link opens it too.
+  open its channel. It has tabs for Videos, Shorts, Live, Podcasts and
+  Playlists (courses too), and only the tabs it has are shown. A pasted channel
+  link opens it too. Long lists load more as you reach the end.
 - **Thumbnails** in any terminal: sharp in kitty and Ghostty, half-blocks
   elsewhere, real images with the optional `ueberzugpp`.
 - **Live chat**, also the chat replay of past streams, with pictures, badges,
@@ -80,7 +81,7 @@ ytwatch "Go interfaces"  # opens with a search
 | `/` | Search (`r` repeats it, `f` sets filters) |
 | `j` `k` `h` `l` | Move / switch between results and preview |
 | `Enter` `s` | Play / play from the start (on a channel: open it) |
-| `c` `[` `]` | Open the channel of the video / previous and next channel tab |
+| `c` `Tab` | Open the channel of the video / next channel tab (`Shift-Tab` previous, `Alt-1`..`9` jump) |
 | `V` | Select several results, then `Enter` plays and `d` downloads them |
 | `d` `a` `Q` | Download / audio only / quality |
 | `o` `y` | Open / copy the link (`3o`: description link 3) |
