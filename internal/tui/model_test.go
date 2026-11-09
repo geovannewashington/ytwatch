@@ -2211,3 +2211,68 @@ func TestAFailedPageIsAskedForAgainTwiceAndThenGivenUp(t *testing.T) {
 		t.Errorf("after two failures the list stops asking: %+v", m.pager)
 	}
 }
+
+func TestTheUnsafeWidthTableIsSortedSoTheSearchCanStopEarly(t *testing.T) {
+	for i, span := range unsafeWidth {
+		if span[0] > span[1] {
+			t.Errorf("span %d is backwards: %U-%U", i, span[0], span[1])
+		}
+		if i > 0 && span[0] <= unsafeWidth[i-1][1] {
+			t.Errorf("span %d (%U) is not after the one before (%U)", i, span[0], unsafeWidth[i-1][1])
+		}
+	}
+	for _, r := range []rune{0xAD, 0x2028, 0x2630, 0x1F1E9, 0x1FAEF} {
+		if !widthIsUnsafe(r) {
+			t.Errorf("%U should be unsafe", r)
+		}
+	}
+	for _, r := range []rune{'a', 'é', 'ß', '日', '—', '’', 0xAC, 0xAE, 0x2631 + 0x10, 0x1F600} {
+		if widthIsUnsafe(r) {
+			t.Errorf("%U is drawn the same everywhere", r)
+		}
+	}
+}
+
+func TestCharactersThatTerminalsMeasureDifferentlyAreRemoved(t *testing.T) {
+	// A soft hyphen counts 0 cells for the width library and 1 in tmux. A line
+	// with one is wider than the screen, the terminal wraps it, and the whole
+	// screen is drawn one row lower until it is redrawn.
+	if got := clean("Ver­wen­dung der Ge­gen­wart"); got != "Verwendung der Gegenwart" {
+		t.Errorf("clean = %q", got)
+	}
+	// What is typed is kept as it was, and drawn without them.
+	typed := "ger\u00adman \u2630 \U0001F1E9\U0001F1EA"
+	if got := stripControls(typed); got != typed {
+		t.Errorf("stripControls changes what the user typed: %q", got)
+	}
+	if got := drawable(typed); got != "german  " {
+		t.Errorf("drawable = %q", got)
+	}
+	if got := drawable("tab\there\x1b[2J"); got != "tab here[2J" {
+		t.Errorf("drawable keeps stripping controls: %q", got)
+	}
+	for _, kept := range []string{"Café ß ä ö ü", "日本語を勉強する", "Ünïcödé — “quotes” ’n’ more"} {
+		if got := clean(kept); got != kept {
+			t.Errorf("clean(%q) = %q", kept, got)
+		}
+	}
+}
+
+func TestNoLineOfTheScreenHoldsACharacterThatTerminalsMeasureDifferently(t *testing.T) {
+	m := New("ger­man")
+	m.width, m.height = 140, 40
+	m.items = []media.Video{
+		{ID: "video000001", Title: "Ver­wen­dung", Channel: "Ka­nal ☰", Description: "Ge­gen­wart und mehr", URL: "https://www.youtube.com/watch?v=video000001"},
+	}
+	m.ranks = []int{0}
+	m.query = "ger­man"
+	m.searchDone, m.metadataDone = true, true
+
+	for _, line := range strings.Split(m.View(), "\n") {
+		for _, r := range line {
+			if widthIsUnsafe(r) {
+				t.Fatalf("%U is on the screen: %q", r, line)
+			}
+		}
+	}
+}

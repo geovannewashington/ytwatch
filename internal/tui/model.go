@@ -1478,6 +1478,19 @@ func stripControls(s string) string {
 	}, s)
 }
 
+// drawable is text that was typed or pasted, ready to be drawn on the screen:
+// without controls, and without the characters that terminals measure
+// differently (see width.go). The text itself is kept as it was typed.
+func drawable(s string) string {
+	return strings.Map(func(r rune) rune {
+		if widthIsUnsafe(r) {
+			return -1
+		}
+
+		return r
+	}, stripControls(s))
+}
+
 func (m *Model) setInput(text string) {
 	text = stripControls(text)
 	m.searchInput = text
@@ -2962,6 +2975,7 @@ func (m *Model) renderHeader() string {
 		searchStyle.Render(" ✦ ") +
 		taglineStyle.Render("Search YouTube from your terminal")
 	searchLine := searchStyle.Render("> ")
+	shownQuery := drawable(m.query) // whatever put it there, it is drawn safe
 
 	switch {
 	case m.searchMode:
@@ -2972,10 +2986,10 @@ func (m *Model) renderHeader() string {
 		searchLine += m.channelLine(max(10, m.width-8))
 	case m.listTitle != "":
 		room := max(10, m.width-8)
-		searchLine += truncate(m.query, room/3) + metaStyle.Render(" › ") +
+		searchLine += truncate(shownQuery, room/3) + metaStyle.Render(" › ") +
 			playlistBadgeStyle.Render(playlistMark+" ") + truncate(m.listTitle, room*2/3-6)
 	default:
-		searchLine += truncate(m.query, max(10, m.width-8))
+		searchLine += truncate(shownQuery, max(10, m.width-8))
 	}
 
 	if m.searching && !m.searchMode && m.animations != animOff {
@@ -3005,10 +3019,11 @@ func (m *Model) channelLine(room int) string {
 		label = strings.TrimPrefix(m.channel.url, "https://www.youtube.com/")
 	}
 
-	queryRoom := min(lipgloss.Width(m.query), max(1, room/3))
+	query := drawable(m.query)
+	queryRoom := min(lipgloss.Width(query), max(1, room/3))
 	labelRoom := max(1, room-queryRoom-3)
 
-	return truncate(m.query, queryRoom) + metaStyle.Render(" › ") +
+	return truncate(query, queryRoom) + metaStyle.Render(" › ") +
 		playlistBadgeStyle.Render(truncate(label, labelRoom))
 }
 
@@ -3950,6 +3965,8 @@ func sanitize(s string) string {
 			return -1
 		case unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Mc, r):
 			// lipgloss and terminals count these differently.
+			return -1
+		case widthIsUnsafe(r):
 			return -1
 		}
 
