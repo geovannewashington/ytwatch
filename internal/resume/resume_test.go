@@ -3,6 +3,7 @@ package resume
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -184,5 +185,121 @@ func TestDirFollowsTheStateHome(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", "/tmp/state-home")
 	if got := Dir(); got != "/tmp/state-home/ytwatch/watch_later" {
 		t.Errorf("Dir = %q", got)
+	}
+}
+
+func TestMetaRoundTripsAndIsPrivate(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "watch_later")
+	path := MetaPath(dir)
+	if filepath.Base(path) != "watching.json" || filepath.Dir(path) != filepath.Dir(dir) {
+		t.Fatalf("path = %q", path)
+	}
+	if MetaPath("") != "" {
+		t.Error("no folder, no file")
+	}
+
+	in := map[string]Entry{
+		"abcdefghijk": {ID: "abcdefghijk", Title: "A title", Channel: "A channel", Duration: 90},
+	}
+	if err := SaveMeta(path, in); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("the file is for the user only: %v %v", info, err)
+	}
+	out := LoadMeta(path)
+	if len(out) != 1 || out["abcdefghijk"] != in["abcdefghijk"] {
+		t.Errorf("out = %+v", out)
+	}
+	if leftovers, _ := filepath.Glob(filepath.Join(filepath.Dir(path), "watching-*.tmp")); len(leftovers) != 0 {
+		t.Errorf("temp files left: %v", leftovers)
+	}
+}
+
+func TestLoadMetaSkipsWhatIsNotSafeOrWhole(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "watching.json")
+	long := strings.Repeat("x", 500)
+	raw := `[{"id":"abcdefghijk","title":"` + long + `","channel":"c","duration":-5},` +
+		`{"id":"../../etc/passwd","title":"bad"},{"id":"","title":"empty"},{"id":"zzzzzzzzzzz","duration":1e12}]`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := LoadMeta(path)
+	if len(got) != 2 {
+		t.Fatalf("only ids of videos are kept: %+v", got)
+	}
+	if e := got["abcdefghijk"]; len([]rune(e.Title)) != maxTextLen || e.Duration != 0 {
+		t.Errorf("a long title is cut and a negative length is dropped: %d %v", len([]rune(e.Title)), e.Duration)
+	}
+	if got["zzzzzzzzzzz"].Duration != 0 {
+		t.Error("an absurd length is dropped")
+	}
+
+	for name, content := range map[string]string{"broken": "{not json", "empty": ""} {
+		p := filepath.Join(t.TempDir(), name)
+		_ = os.WriteFile(p, []byte(content), 0o600)
+		if got := LoadMeta(p); len(got) != 0 {
+			t.Errorf("%s file: %+v", name, got)
+		}
+	}
+	if got := LoadMeta(filepath.Join(t.TempDir(), "missing")); len(got) != 0 || got == nil {
+		t.Errorf("missing file: %+v", got)
+	}
+}
+
+func TestRecentListsTheVideoLeftLastFirst(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, id string, start int, age time.Duration) {
+		content := "# https://www.youtube.com/watch?v=" + id + "\nstart=" + strconv.Itoa(start) + "\n"
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		when := time.Now().Add(-age)
+		if err := os.Chtimes(path, when, when); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("a", "oldoldoldol", 100, 48*time.Hour)
+	write("b", "newnewnewne", 200, time.Hour)
+	write("c", "midmidmidmi", 300, 24*time.Hour)
+	_ = os.WriteFile(filepath.Join(dir, "d"), []byte("not a watch later file"), 0o600)
+
+	got := Recent(dir)
+	if len(got) != 3 || got[0].ID != "newnewnewne" || got[1].ID != "midmidmidmi" || got[2].ID != "oldoldoldol" {
+		t.Fatalf("order = %+v", got)
+	}
+	if got[0].Position != 200*time.Second {
+		t.Errorf("position = %v", got[0].Position)
+	}
+	if Recent("") != nil || Recent(filepath.Join(dir, "missing")) != nil {
+		t.Error("no folder, no list")
+	}
+}
+
+func TestSaveMetaKeepsTheNewestWhenThereAreTooMany(t *testing.T) {
+	entries := map[string]Entry{}
+	for i := 0; i < maxFiles+5; i++ {
+		id := "vidaaa" + strconv.Itoa(100000+i)
+		entries[id] = Entry{ID: id, Title: "T", Played: int64(i + 1)}
+	}
+	path := filepath.Join(t.TempDir(), "watching.json")
+	if err := SaveMeta(path, entries); err != nil {
+		t.Fatal(err)
+	}
+
+	got := LoadMeta(path)
+	if len(got) != maxFiles {
+		t.Fatalf("len = %d", len(got))
+	}
+	for _, id := range []string{"vidaaa100000", "vidaaa100004"} {
+		if _, ok := got[id]; ok {
+			t.Errorf("the oldest %s should be the ones dropped", id)
+		}
+	}
+	if _, ok := got["vidaaa"+strconv.Itoa(100000+maxFiles+4)]; !ok {
+		t.Error("the newest is kept")
 	}
 }
