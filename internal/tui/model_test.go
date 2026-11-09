@@ -2243,6 +2243,30 @@ func TestThePreviewOpensWithoutMakingTheFrameTallerThanTheTerminal(t *testing.T)
 	}
 }
 
+func TestATitleThatIsEmptyOnceCleanedGetsAPlaceholder(t *testing.T) {
+	short := media.Video{ID: "short000001", Title: "\U0001F51C\U0001F384", Duration: 20, Short: true, URL: "https://www.youtube.com/shorts/short000001"}
+	if got := displayTitle(short); got != "Untitled Short" {
+		t.Errorf("an emoji-only Short = %q", got)
+	}
+	if got := displayTitle(media.Video{ID: "video000001", Title: "\u200b "}); got != "Untitled video" {
+		t.Errorf("an invisible title = %q", got)
+	}
+	if got := displayTitle(media.Video{ID: "video000002", Title: "A title \U0001F384"}); got != "A title" && got != "A title " {
+		t.Errorf("a normal title keeps its text = %q", got)
+	}
+
+	m := New("test")
+	m.width, m.height = 120, 30
+	m.items, m.ranks = []media.Video{short, {ID: "video000003", Title: "Next", URL: "https://www.youtube.com/watch?v=video000003"}}, []int{0, 10}
+	rows := strings.Split(m.renderResultLines(60, 10), "\n")
+	if !strings.Contains(rows[0], "Untitled Short") {
+		t.Errorf("the row of the Short is not blank:\n%s", strings.Join(rows[:2], "\n"))
+	}
+	if preview := m.renderPreview(50, 20); !strings.Contains(preview, "Untitled Short") {
+		t.Errorf("the preview has a title:\n%s", preview)
+	}
+}
+
 func TestTheUnsafeWidthTableIsSortedSoTheSearchCanStopEarly(t *testing.T) {
 	for i, span := range unsafeWidth {
 		if span[0] > span[1] {

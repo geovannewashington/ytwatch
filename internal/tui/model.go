@@ -889,7 +889,7 @@ func (m *Model) openPlaylist(v media.Video) tea.Cmd {
 	}
 	m.pushResults()
 	m.channel = nil
-	m.listTitle = clean(v.Title)
+	m.listTitle = displayTitle(v)
 	loc := m.locale()
 
 	return m.startListing("Opening playlist...", youtube.BrowsePageSize, func(ctx context.Context, start int, emit func(youtube.Event)) {
@@ -2692,7 +2692,7 @@ func (m *Model) playSelectedFrom(startOver bool) tea.Cmd {
 	}
 
 	if _, exists := m.playing[v.ID]; exists {
-		m.status = "Already playing" + noteMark + clean(v.Title)
+		m.status = "Already playing" + noteMark + displayTitle(v)
 		return nil
 	}
 
@@ -2768,9 +2768,9 @@ func (m *Model) startPlayerWith(videos []media.Video, opts player.Options) tea.C
 		m.status = fmt.Sprintf("Playing %d results"+noteMark+"< and > skip", len(videos))
 	} else {
 		v := videos[0]
-		m.status = "Playing" + noteMark + clean(v.Title)
+		m.status = "Playing" + noteMark + displayTitle(v)
 		if text := m.resumeStatus(videos, opts); text != "" {
-			m.status = text + noteMark + clean(v.Title)
+			m.status = text + noteMark + displayTitle(v)
 		}
 
 		if v.IsCurrentlyLive() {
@@ -2863,7 +2863,7 @@ func (m *Model) startDownloads(videos []media.Video) tea.Cmd {
 
 	for _, v := range videos {
 		if _, exists := m.downloading[v.ID]; exists {
-			m.status = "Already downloading" + noteMark + clean(v.Title)
+			m.status = "Already downloading" + noteMark + displayTitle(v)
 			continue
 		}
 
@@ -3195,7 +3195,7 @@ func (m *Model) renderResultRows(width, height int) string {
 			titleWidth -= 2
 		}
 
-		rowTitle := clean(v.Title)
+		rowTitle := displayTitle(v)
 		if v.IsChannel() {
 			rowTitle = channelTitle(v)
 		}
@@ -3454,7 +3454,7 @@ func (m *Model) renderPreview(width, height int) string {
 			lines = append(lines, m.marqueeText(channelTitle(v), width))
 			lines = append(lines, metaStyle.Render(truncate(strings.Join(channelFacts(v), " · "), width)))
 		} else {
-			lines = append(lines, m.marqueeText(clean(v.Title), width))
+			lines = append(lines, m.marqueeText(displayTitle(v), width))
 			lines = append(lines, metaStyle.Render(truncate(channelText(v), width)))
 		}
 
@@ -3939,6 +3939,28 @@ func wrapLines(s string, width, maxLines int) []string {
 // Bengali or Hindi) or that would break the layout (control characters). Such
 // characters make borders drift while scrolling.
 func clean(s string) string { return sanitize(s) }
+
+// displayTitle is the title of v as the lists show it. A title can be empty once
+// what the terminal cannot draw is removed, such as one made of emoji only, and
+// an empty line looks like a gap in the list.
+func displayTitle(v media.Video) string {
+	title := clean(v.Title)
+	invisible := func(r rune) bool { return unicode.IsSpace(r) || unicode.Is(unicode.Cf, r) }
+	if strings.TrimFunc(title, invisible) != "" {
+		return title
+	}
+
+	switch {
+	case v.IsShort():
+		return "Untitled Short"
+	case v.IsPlaylist():
+		return "Untitled playlist"
+	case v.IsChannel():
+		return "Untitled channel"
+	}
+
+	return "Untitled video"
+}
 
 // channelText is the name of the channel of v, with its mark when it has one.
 func channelText(v media.Video) string {

@@ -121,7 +121,7 @@ func (m *Model) needsTick() bool {
 		return false
 	}
 
-	title := lipgloss.Width(clean(v.Title))
+	title := lipgloss.Width(displayTitle(v))
 	results, preview := m.paneWidths()
 	// A badge or the playlist mark takes some of the row, so allow for them.
 	if title > results-2-maxRowDecoration {
