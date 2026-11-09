@@ -2212,6 +2212,37 @@ func TestAFailedPageIsAskedForAgainTwiceAndThenGivenUp(t *testing.T) {
 	}
 }
 
+func TestThePreviewOpensWithoutMakingTheFrameTallerThanTheTerminal(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 140, 40
+	now := time.Now()
+	m.clock = func() time.Time { return now }
+	m.query = "learning german"
+	m.handleSearchEvent(youtube.Event{Kind: youtube.EventResult, Video: media.Video{ID: "video0001", Title: "One", URL: "https://www.youtube.com/watch?v=video0001"}})
+	if !m.splitAnimating() {
+		t.Fatal("the preview should be opening")
+	}
+
+	// A pane narrower than the text it holds wraps the lines. The frame then
+	// has more lines than the terminal, which scrolls it and breaks the screen
+	// until the next full redraw.
+	for elapsed := time.Duration(0); elapsed <= splitDuration+10*time.Millisecond; elapsed += 4 * time.Millisecond {
+		now = m.fx.splitAt.Add(elapsed)
+		if m.fx.splitAt.IsZero() {
+			break
+		}
+		lines := strings.Split(m.View(), "\n")
+		if len(lines) != m.height {
+			t.Fatalf("after %v the frame has %d lines, want %d", elapsed, len(lines), m.height)
+		}
+		for i, line := range lines {
+			if w := lipgloss.Width(line); w > m.width {
+				t.Fatalf("after %v line %d is %d wide, the terminal is %d", elapsed, i, w, m.width)
+			}
+		}
+	}
+}
+
 func TestTheUnsafeWidthTableIsSortedSoTheSearchCanStopEarly(t *testing.T) {
 	for i, span := range unsafeWidth {
 		if span[0] > span[1] {

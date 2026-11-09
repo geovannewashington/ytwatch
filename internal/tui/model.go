@@ -38,7 +38,13 @@ const (
 	minWidth  = 80
 	minHeight = 18
 	wideWidth = 100 // below this the preview pane is hidden
-	maxWidth  = 160 // wider terminals get empty margins, so the layout keeps its shape
+
+	// minPreviewWidth is the narrowest preview pane. While it opens it stays
+	// hidden until it can have this width: renderPreview draws at 8 columns at
+	// least, and a pane narrower than its text would wrap the lines, making the
+	// frame taller than the terminal.
+	minPreviewWidth = 12
+	maxWidth        = 160 // wider terminals get empty margins, so the layout keeps its shape
 )
 
 type searchStartedMsg struct {
@@ -2378,7 +2384,7 @@ func (m *Model) paneWidths() (results, preview int) {
 	// Two panes, each with a 1-column border and 1-column padding per side.
 	content := m.width - 8
 	results = max(25, content*53/100)
-	preview = max(12, content-results)
+	preview = max(minPreviewWidth, content-results)
 
 	return results, preview
 }
@@ -3087,7 +3093,7 @@ func (m *Model) renderBody() string {
 	if m.splitAnimating() {
 		// The preview opens from the right: its share grows from nothing.
 		opening := int(m.splitProgress() * float64(previewWidth))
-		if opening < 6 {
+		if opening < minPreviewWidth {
 			full := m.width - 4
 			return activePanelStyle.Width(full + padding).Height(height).Render(m.renderResultLines(full, height))
 		}
