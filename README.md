@@ -78,7 +78,8 @@ ytwatch "Go interfaces"  # opens with a search
 
 | Key | Action |
 |---|---|
-| `/` | Search (`r` repeats it, `f` sets filters) |
+| `/` | Search, or filter the results once there are some (`Esc` clears) |
+| `i` | Edit the search (`r` repeats it, `f` sets filters) |
 | `j` `k` `h` `l` | Move / switch between results and preview |
 | `Enter` `s` | Play / play from the start (on a channel: open it) |
 | `c` `Tab` | Open the channel of the video / next channel tab (`Shift-Tab` previous, `Alt-1`..`9` jump) |

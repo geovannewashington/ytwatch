@@ -214,6 +214,9 @@ type Model struct {
 	listTitle    string         // title of the open playlist, empty for search results
 	channel      *channelView   // the open channel, nil outside a channel
 	pager        *pager         // the next page of an open playlist or channel tab
+	narrowBase   *narrowBase    // the whole list while the results are filtered with /
+	narrowText   string         // what the filter looks for
+	narrowTyping bool           // the line at the top edits the filter, not the search
 	resultCap    int            // how many results a paged search keeps, 0 for no limit
 	channelDescs map[string]int // channel results: descAsked or descDone
 	descTick     string         // the channel whose description waits for the delay
@@ -508,6 +511,7 @@ func (m *Model) startStream(
 	m.status = status
 	m.pager = nil
 	m.resultCap = 0
+	m.narrowBase, m.narrowText, m.narrowTyping = nil, "", false
 
 	return streamCmd(ctx, generation, run)
 }
@@ -569,7 +573,7 @@ func (m *Model) startListing(
 // list and no other page or search is running.
 func (m *Model) loadMore() tea.Cmd {
 	p := m.pager
-	if p == nil || p.busy || p.done || m.searching || len(m.items) == 0 ||
+	if p == nil || p.busy || p.done || m.searching || len(m.items) == 0 || m.narrowBase != nil ||
 		m.selected < len(m.items)-pagerMargin {
 		return nil
 	}
@@ -598,8 +602,8 @@ func (m *Model) loadMore() tea.Cmd {
 
 // resultsStatus counts what the list shows.
 func (m *Model) resultsStatus() string {
-	if m.listTitle != "" {
-		return plural(len(m.items), "result")
+	if m.narrowBase != nil {
+		return m.narrowStatus()
 	}
 
 	return plural(len(m.items), "result")
@@ -750,11 +754,7 @@ func (m *Model) applyChannelDescription(msg channelDescMsg) {
 		return
 	}
 
-	for i := range m.items {
-		if m.items[i].ID == msg.id {
-			m.items[i].Description = msg.text
-		}
-	}
+	m.eachCopy(msg.id, func(v *media.Video) { v.Description = msg.text })
 }
 
 // pushResults remembers the list on screen, to return to it with Esc.
@@ -791,6 +791,7 @@ func (m *Model) pushResults() {
 // openChannel lists the videos of the channel at url, on its first tab. Esc
 // returns to the results. name and id are empty when they are not known.
 func (m *Model) openChannel(url, name, id string) tea.Cmd {
+	m.clearNarrow() // the list that Esc comes back to is the whole one
 	m.pushResults()
 	m.listTitle = ""
 	m.channel = &channelView{url: url, name: clean(name), id: id, handle: youtube.HandleOf(url)}
@@ -887,6 +888,7 @@ func (m *Model) openPlaylist(v media.Video) tea.Cmd {
 		m.status = "No link for this playlist"
 		return nil
 	}
+	m.clearNarrow() // the list that Esc comes back to is the whole one
 	m.pushResults()
 	m.channel = nil
 	m.listTitle = displayTitle(v)
@@ -1359,20 +1361,29 @@ func (m *Model) handleSearchEvent(event youtube.Event) []tea.Cmd {
 				c.id = event.Video.ChannelID
 			}
 		}
+		rank := event.Rank
+		if base := m.narrowBase; base != nil {
+			// A filter is on: the result joins the whole list, and the one on
+			// screen when it matches.
+			if slices.ContainsFunc(base.items, func(v media.Video) bool { return v.ID == event.Video.ID }) {
+				return nil
+			}
+			m.insertIntoNarrowBase(event.Video, rank)
+			if !fuzzyMatch(matchText(event.Video), m.narrowText) {
+				return nil
+			}
+
+			return m.insertResult(event.Video, rank)
+		}
 		for _, existing := range m.items {
 			if existing.ID == event.Video.ID {
 				return nil
 			}
 		}
-		return m.insertResult(event.Video, event.Rank)
+		return m.insertResult(event.Video, rank)
 
 	case youtube.EventDetails:
-		for i := range m.items {
-			if m.items[i].ID == event.Video.ID {
-				m.items[i] = media.MergeDetails(m.items[i], event.Video)
-				break
-			}
-		}
+		m.eachCopy(event.Video.ID, func(v *media.Video) { *v = media.MergeDetails(*v, event.Video) })
 
 		if _, isPlaying := m.playing[event.Video.ID]; isPlaying &&
 			event.Video.IsCurrentlyLive() &&
@@ -1503,9 +1514,19 @@ func (m *Model) setInput(text string) {
 	m.searchCursor = len([]rune(text))
 }
 
-// handleSearchInput edits the search line. The cursor moves with the arrows,
-// Home and End, like in a shell.
+// handleSearchInput handles a key while the line at the top is open: it edits
+// the search, or the filter of the results.
 func (m *Model) handleSearchInput(msg tea.KeyMsg) tea.Cmd {
+	if m.narrowTyping {
+		return m.handleNarrowInput(msg)
+	}
+
+	return m.handleSearchEdit(msg)
+}
+
+// handleSearchEdit edits the search line. The cursor moves with the arrows,
+// Home and End, like in a shell.
+func (m *Model) handleSearchEdit(msg tea.KeyMsg) tea.Cmd {
 	runes := []rune(m.searchInput)
 	cursor := min(max(m.searchCursor, 0), len(runes))
 
@@ -1670,11 +1691,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 
 	case "/":
+		return m.startNarrow()
+
+	case "i":
 		// The current query is there to edit; Ctrl+U clears it.
-		m.searchMode = true
-		m.setInput(m.query)
-		m.historyPos = -1
-		m.status = "Edit the search"
+		m.editSearch()
 
 		return nil
 
@@ -1714,6 +1735,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			m.endVisual()
 			m.status = ""
 			return nil
+		}
+
+		if m.narrowBase != nil {
+			m.clearNarrow()
+			m.status = m.resultsStatus()
+
+			return m.scheduleThumbnail()
 		}
 
 		if len(m.parents) > 0 {
@@ -2951,29 +2979,33 @@ func (m *Model) keyHints() string {
 	switch {
 	case m.searchMode && m.query == "" && len(m.items) == 0:
 		return "Enter search · Up/Down past searches · Esc, then ? for help"
+	case m.searchMode && m.narrowTyping:
+		return "Enter keep filter · Esc clear · Up/Down move · Ctrl+U clear text"
 	case m.searchMode:
 		return "Enter search · Esc cancel · Up/Down past searches · Ctrl+U clear"
 	case m.visual:
 		return "j/k extend · Enter play · d download · Esc cancel"
+	case m.narrowBase != nil:
+		return "j/k move · Enter play · / filter · i search · Esc clear filter · ? help"
 	case m.channel != nil && !hasSelection:
-		return "Tab tabs · Esc back · / search · ? help"
+		return "Tab tabs · Esc back · / filter · i search · ? help"
 	case m.channel != nil && v.IsPlaylist():
 		return "j/k move · Enter play all · B browse · Tab tabs · Esc back · ? help"
 	case m.channel != nil:
 		return "j/k move · Enter play · d download · Tab tabs · Esc back · ? help"
 	case len(m.parents) > 0 && !hasSelection:
-		return "Esc back to results · / search · ? help"
+		return "Esc back to results · / filter · i search · ? help"
 	case len(m.parents) > 0:
 		return "j/k move · Enter play · d download · V select · Esc back · ? help"
 	case !hasSelection:
 		return "/ search · f filters · ? help · q quit"
 	case v.IsPlaylist():
-		return "j/k move · Enter play all · B browse · V select · / search · ? help"
+		return "j/k move · Enter play all · B browse · V select · / filter · i search · ? help"
 	case v.IsChannel():
-		return "j/k move · Enter browse channel · / search · f filters · ? help"
+		return "j/k move · Enter browse channel · / filter · i search · ? help"
 	}
 
-	return "j/k move · Enter play · d download · c channel · V select · / search · f filters · ? help"
+	return "j/k move · Enter play · d download · c channel · V select · / filter · i search · f filters · ? help"
 }
 
 func (m *Model) renderHeader() string {
@@ -2982,6 +3014,9 @@ func (m *Model) renderHeader() string {
 		taglineStyle.Render("Search YouTube from your terminal")
 	searchLine := searchStyle.Render("> ")
 	shownQuery := drawable(m.query) // whatever put it there, it is drawn safe
+	if m.narrowTyping {
+		searchLine = searchStyle.Render("/ ") // the line filters the results
+	}
 
 	switch {
 	case m.searchMode:
@@ -2996,6 +3031,12 @@ func (m *Model) renderHeader() string {
 			playlistBadgeStyle.Render(playlistMark+" ") + truncate(m.listTitle, room*2/3-6)
 	default:
 		searchLine += truncate(shownQuery, max(10, m.width-8))
+	}
+
+	if m.narrowBase != nil && !m.searchMode {
+		if room := m.width - lipgloss.Width(searchLine) - 6; room >= 4 {
+			searchLine += metaStyle.Render("  / " + truncate(drawable(m.narrowText), room))
+		}
 	}
 
 	if m.searching && !m.searchMode && m.animations != animOff {
@@ -3283,6 +3324,8 @@ func (m *Model) renderResultRows(width, height int) string {
 func (m *Model) renderEmptyList(width, height int) []string {
 	message, mood := "Press / to search", moodIdle
 	switch {
+	case m.narrowBase != nil:
+		message = "No result matches the filter"
 	case m.searchMode:
 		message = "Type your search and press Enter"
 	case m.searchError != "":
@@ -3753,7 +3796,7 @@ func (m *Model) renderHelp() string {
 		{"c  Tab", "Open the channel of a video / switch its tabs (Alt+1-9 jumps)"},
 		{"s", "Play from the start a video that was left halfway"},
 		{"Esc", "Back · quits on the main page"},
-		{"/  r", "Edit the search (Up/Down: past ones) / repeat it"},
+		{"/  i  r", "Filter results (Esc clears) / edit search / repeat it"},
 		{"f", "Filters: type, duration, upload date"},
 		{"V", "Select several results · Enter plays, d downloads"},
 		{"d  a  Q", "Download / audio only / quality"},

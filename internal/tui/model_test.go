@@ -2267,6 +2267,181 @@ func TestATitleThatIsEmptyOnceCleanedGetsAPlaceholder(t *testing.T) {
 	}
 }
 
+func TestFuzzyMatchKeepsLettersInOrderIgnoringCaseAndAccents(t *testing.T) {
+	for _, tc := range []struct {
+		text, pattern string
+		want          bool
+	}{
+		{"Becoming Fluent in German FAST", "grm fst", true},
+		{"Becoming Fluent in German FAST", "GERMAN", true},
+		{"Café déjà vu", "cafe deja", true},
+		{"Becoming Fluent in German FAST", "tsaf", false}, // letters out of order
+		{"Becoming Fluent in German FAST", "xyz", false},
+		{"anything", "", true},
+		{"anything", "   ", true},
+		{"日本語を勉強する方法", "勉強", true},
+	} {
+		if got := fuzzyMatch(tc.text, tc.pattern); got != tc.want {
+			t.Errorf("fuzzyMatch(%q, %q) = %v, want %v", tc.text, tc.pattern, got, tc.want)
+		}
+	}
+}
+
+func filterModel() *Model {
+	m := New("test")
+	m.width, m.height = 120, 40
+	m.query = "learning german"
+	for i, v := range []media.Video{
+		{ID: "video0001", Title: "German for beginners", Channel: "Anna"},
+		{ID: "video0002", Title: "Cooking pasta", Channel: "Luigi"},
+		{ID: "video0003", Title: "Advanced German grammar", Channel: "Bob"},
+		{ID: "video0004", Title: "Pasta again", Channel: "Anna German"},
+	} {
+		v.URL = "https://www.youtube.com/watch?v=" + v.ID
+		m.items = append(m.items, v)
+		m.ranks = append(m.ranks, i*10)
+	}
+	m.searchDone, m.metadataDone = true, true
+
+	return m
+}
+
+func typeText(m *Model, text string) {
+	for _, r := range text {
+		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+}
+
+func TestSlashFiltersTheResultsAsYouTypeAndEscBringsThemBack(t *testing.T) {
+	m := filterModel()
+	m.selected = 2 // "Advanced German grammar"
+
+	m.Update(runeKey('/'))
+	if !m.searchMode || !m.narrowTyping || m.narrowBase == nil {
+		t.Fatalf("/ should open the filter line: search=%v typing=%v", m.searchMode, m.narrowTyping)
+	}
+	typeText(m, "germ")
+	if len(m.items) != 3 || m.items[0].ID != "video0001" || m.items[1].ID != "video0003" || m.items[2].ID != "video0004" {
+		t.Fatalf("matches by title or channel, in the same order: %+v", m.items)
+	}
+	if m.selectedID() != "video0003" {
+		t.Errorf("the selection stays on the same result: %q", m.selectedID())
+	}
+	if m.query != "learning german" || m.status != "3 of 4 results" {
+		t.Errorf("the search is untouched: query=%q status=%q", m.query, m.status)
+	}
+	if header := m.renderHeader(); !strings.Contains(header, "germ") {
+		t.Errorf("the filter is shown:\n%s", header)
+	}
+
+	typeText(m, "xx")
+	if len(m.items) != 0 || !strings.Contains(m.renderResultLines(60, 10), "No result matches the filter") {
+		t.Errorf("nothing matches: %d items", len(m.items))
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+
+	// Enter keeps the filter and goes back to the list keys.
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.searchMode || m.narrowTyping || m.narrowBase == nil || len(m.items) != 3 {
+		t.Fatalf("Enter keeps the filter: search=%v items=%d", m.searchMode, len(m.items))
+	}
+	if !strings.Contains(m.keyHints(), "Esc clear filter") {
+		t.Errorf("hints = %q", m.keyHints())
+	}
+	m.selected = 1
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.narrowBase != nil || len(m.items) != 4 || m.selectedID() != "video0003" || m.status != "4 results" {
+		t.Fatalf("Esc brings the whole list back on the same result: items=%d selected=%q status=%q", len(m.items), m.selectedID(), m.status)
+	}
+	if m.confirmQuit {
+		t.Error("the Esc that clears the filter does not ask to quit")
+	}
+
+	// Esc while typing clears too, and an empty filter is no filter.
+	m.Update(runeKey('/'))
+	typeText(m, "pasta")
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.searchMode || m.narrowBase != nil || len(m.items) != 4 {
+		t.Fatalf("Esc while typing: search=%v items=%d", m.searchMode, len(m.items))
+	}
+	m.Update(runeKey('/'))
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.narrowBase != nil || len(m.items) != 4 {
+		t.Error("Enter on an empty filter leaves no filter on")
+	}
+}
+
+func TestIEditsTheSearchAndSlashEditsItOnlyWithoutResults(t *testing.T) {
+	m := filterModel()
+	m.Update(runeKey('i'))
+	if !m.searchMode || m.narrowTyping || m.searchInput != "learning german" {
+		t.Fatalf("i edits the search: search=%v typing=%v input=%q", m.searchMode, m.narrowTyping, m.searchInput)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+	empty := New("test")
+	empty.Update(runeKey('/'))
+	if !empty.searchMode || empty.narrowTyping || empty.narrowBase != nil {
+		t.Errorf("/ without results edits the search: typing=%v", empty.narrowTyping)
+	}
+}
+
+func TestResultsThatArriveWhileFilteredJoinTheWholeList(t *testing.T) {
+	m := filterModel()
+	m.Update(runeKey('/'))
+	typeText(m, "germ")
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	m.handleSearchEvent(youtube.Event{Kind: youtube.EventResult, Rank: 15, Video: media.Video{ID: "video0005", Title: "More German", URL: "https://www.youtube.com/watch?v=video0005"}})
+	m.handleSearchEvent(youtube.Event{Kind: youtube.EventResult, Rank: 16, Video: media.Video{ID: "video0006", Title: "Gardening", URL: "https://www.youtube.com/watch?v=video0006"}})
+	m.handleSearchEvent(youtube.Event{Kind: youtube.EventResult, Rank: 15, Video: media.Video{ID: "video0005", Title: "More German"}}) // again
+	if len(m.items) != 4 || len(m.narrowBase.items) != 6 || m.items[1].ID != "video0005" {
+		t.Fatalf("on screen %d, whole %d: %+v", len(m.items), len(m.narrowBase.items), m.items)
+	}
+
+	m.handleSearchEvent(youtube.Event{Kind: youtube.EventDetails, Video: media.Video{ID: "video0003", Description: "Details came"}})
+	described := func(items []media.Video) bool {
+		at := slices.IndexFunc(items, func(v media.Video) bool { return v.ID == "video0003" })
+		return at >= 0 && items[at].Description == "Details came"
+	}
+	if !described(m.items) || !described(m.narrowBase.items) {
+		t.Error("details reach both lists")
+	}
+
+	// More pages are not loaded to look for matches.
+	m.pager = &pager{load: func(context.Context, int, func(youtube.Event)) {}, next: 51, step: 50}
+	m.selected = len(m.items) - 1
+	if m.loadMore() != nil {
+		t.Error("a filtered list does not load more")
+	}
+
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if len(m.items) != 6 || m.items[5].ID != "video0004" && m.items[1].ID != "video0005" {
+		t.Fatalf("the whole list has everything: %+v", m.items)
+	}
+}
+
+func TestOpeningAPlaylistFromAFilteredListComesBackToTheWholeList(t *testing.T) {
+	m := filterModel()
+	m.items[0].URL = "https://www.youtube.com/playlist?list=PLabcdef"
+	m.items[0].ID = "PLabcdef"
+	m.Update(runeKey('/'))
+	typeText(m, "german")
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.selected = 0
+
+	m.handleKey(runeKey('B'))
+	m.cancel()
+	if m.narrowBase != nil || len(m.parents) != 1 || len(m.parents[0].items) != 4 {
+		t.Fatalf("the parent list is the whole one: filter=%v parents=%d", m.narrowBase != nil, len(m.parents))
+	}
+	m.closePlaylist()
+	if len(m.items) != 4 {
+		t.Errorf("items = %d", len(m.items))
+	}
+}
+
 func TestTheUnsafeWidthTableIsSortedSoTheSearchCanStopEarly(t *testing.T) {
 	for i, span := range unsafeWidth {
 		if span[0] > span[1] {
@@ -2329,5 +2504,41 @@ func TestNoLineOfTheScreenHoldsACharacterThatTerminalsMeasureDifferently(t *test
 				t.Fatalf("%U is on the screen: %q", r, line)
 			}
 		}
+	}
+}
+
+func TestTheFilterIgnoresWhatTheScreenNeverShows(t *testing.T) {
+	// The titles are matched as they are shown, so the pattern is too: a soft
+	// hyphen or an emoji that was pasted must not stop a match.
+	if !fuzzyMatch("Verwendung", "ver­wen­dung \U0001F600") {
+		t.Error("the pattern is cleaned like the text")
+	}
+}
+
+func TestClearingTheFilterAppliesTheCapToResultsThatCameInMeanwhile(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 120, 40
+	m.query = "x"
+	for i := 0; i < youtube.ResultLimit; i++ {
+		m.items = append(m.items, media.Video{ID: fmt.Sprintf("vid%08d", i), Title: fmt.Sprintf("match %d", i)})
+		m.ranks = append(m.ranks, i*10)
+	}
+	m.searchDone, m.metadataDone = true, true
+	m.Update(runeKey('/'))
+	typeText(m, "match")
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// A result that ranks first arrives and matches: it is on screen, and the
+	// worst one is not removed from the whole list behind the screen's back.
+	m.handleSearchEvent(youtube.Event{Kind: youtube.EventResult, Rank: -5, Video: media.Video{ID: "newcomer001", Title: "match new"}})
+	if m.items[0].ID != "newcomer001" {
+		t.Fatalf("the newcomer is first: %q", m.items[0].ID)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if len(m.items) != youtube.ResultLimit || m.items[0].ID != "newcomer001" {
+		t.Errorf("the whole list is back, cut to the cap, newcomer kept: %d items, first %q", len(m.items), m.items[0].ID)
+	}
+	if last := m.items[len(m.items)-1].ID; last == "vid00000049" {
+		t.Errorf("the worst ranked should have gone, not the newcomer: %q", last)
 	}
 }
