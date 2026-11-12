@@ -1873,6 +1873,38 @@ func TestAltDigitsJumpToAChannelTab(t *testing.T) {
 	}
 }
 
+func TestACountBeforeTabJumpsToThatChannelTab(t *testing.T) {
+	m := New("test")
+	m.width, m.height = 120, 30
+	m.items, m.ranks = []media.Video{{ID: "video0001", Title: "One", ChannelURL: "https://www.youtube.com/@x"}}, []int{0}
+	m.handleKey(runeKey('c'))
+	m.cancel()
+	m.channel.tabs = []int{youtube.ChannelVideos, youtube.ChannelShorts, youtube.ChannelPlaylists}
+
+	m.handleKey(runeKey('3'))
+	m.handleKey(tabKey)
+	if m.channel.tab != youtube.ChannelPlaylists {
+		t.Fatalf("3 Tab = tab %d, want Playlists", m.channel.tab)
+	}
+	m.handleKey(runeKey('2'))
+	m.handleKey(tabKey)
+	if m.channel.tab != youtube.ChannelShorts {
+		t.Fatalf("2 Tab = tab %d, want Shorts", m.channel.tab)
+	}
+	generation := m.generation
+	m.handleKey(runeKey('4'))
+	m.handleKey(tabKey)
+	if m.channel.tab != youtube.ChannelShorts || m.generation != generation || !strings.Contains(m.status, "only 3 tabs") {
+		t.Errorf("a tab that does not exist: tab=%d status=%q", m.channel.tab, m.status)
+	}
+	// Tab without a count still moves to the next tab.
+	m.handleKey(tabKey)
+	if m.channel.tab != youtube.ChannelPlaylists {
+		t.Errorf("Tab = tab %d, want Playlists", m.channel.tab)
+	}
+	m.cancel()
+}
+
 func TestTheChannelHeaderShowsTheHandleAndTheTabBarTopsTheResultsPane(t *testing.T) {
 	m := New("test")
 	m.width, m.height = 120, 30

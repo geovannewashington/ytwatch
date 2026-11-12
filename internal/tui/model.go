@@ -1788,6 +1788,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 
 	case "tab":
+		if m.channel != nil && hasCount {
+			return m.jumpChannelTab(count - 1) // 3 Tab: the tab numbered 3 in the bar
+		}
 		if m.channel != nil {
 			return m.switchChannelTab(1)
 		}
@@ -3811,7 +3814,7 @@ func (m *Model) renderHelp() string {
 		{"j k", "Move through the results"},
 		{"h l", "Switch between the results and the preview"},
 		{"Enter  B", "Play (all of a playlist) / browse a playlist"},
-		{"c  Tab", "Open the channel of a video / switch its tabs (Alt+1-9 jumps)"},
+		{"c  Tab", "Open the channel of a video / switch its tabs (3 Tab: tab 3)"},
 		{"s  gh", "Play from the start / open the history"},
 		{"Esc", "Back · quits on the main page"},
 		{"/  i  r", "Filter results (Esc clears) / edit search / repeat it"},

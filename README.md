@@ -83,7 +83,7 @@ ytwatch "Go interfaces"  # opens with a search
 | `j` `k` `h` `l` | Move / switch between results and preview |
 | `Enter` `s` | Play / play from the start (on a channel: open it) |
 | `gh` | History: the videos you played, the last one first, with how far you got |
-| `c` `Tab` | Open the channel of the video / next channel tab (`Shift-Tab` previous, `Alt-1`..`9` jump) |
+| `c` `Tab` | Open the channel of the video / next channel tab (`Shift-Tab` previous, `3` `Tab` or `Alt-3` opens tab 3) |
 | `V` | Select several results, then `Enter` plays and `d` downloads them |
 | `d` `a` `Q` | Download / audio only / quality |
 | `o` `y` | Open / copy the link (`3o`: description link 3) |
